@@ -24,6 +24,7 @@ interface RideRoom {
   name: string;
   destination: string;
   createdAt: number;
+  status: 'waiting' | 'active' | 'ended';
 }
 
 interface Rider {
@@ -54,6 +55,34 @@ export default function RoomDetailsPage() {
   const [locations, setLocations] = useState<RiderLocation[]>([]);
   
   const [now, setNow] = useState(Date.now());
+
+  
+const updateRideStatus = async (status: 'active' | 'ended') => {
+  if (!room) return;
+
+  try {
+    const { data, error } = await supabase
+      .from('ride_rooms')
+      .update({ status })
+      .eq('id', room.id)
+      .select('id')
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!data) {
+      throw new Error('Room status update failed');
+    }
+
+    setRoom((current) =>
+      current ? { ...current, status } : current
+    );
+  } catch (error) {
+    console.error('Update ride status failed:', error);
+    alert('Could not update ride status. Please try again.');
+  }
+};
+
 
 useEffect(() => {
   const interval = window.setInterval(() => {
@@ -113,7 +142,7 @@ useEffect(() => {
       try {
         const { data, error } = await supabase
           .from('ride_rooms')
-          .select('id, room_code, ride_name, destination, created_at')
+          .select('id, room_code, ride_name, destination, created_at, status')
           .eq('id', roomId)
           .maybeSingle();
 
@@ -128,6 +157,7 @@ useEffect(() => {
                   name: data.ride_name,
                   destination: data.destination ?? '',
                   createdAt: new Date(data.created_at).getTime(),
+                  status: data.status ?? 'waiting',
                 }
               : null
           );
@@ -214,29 +244,65 @@ useEffect(() => {
 
     void loadRiders();
 
-    const channel = supabase
-      .channel(`ride-members-${roomId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'ride_members',
-          filter: `room_id=eq.${roomId}`,
-        },
-        () => {
-          void loadRiders();
-        }
-      )
-      .subscribe((status) => {
-        console.log('Riders realtime:', status);
-      });
+    
 
-    return () => {
-      cancelled = true;
-      void supabase.removeChannel(channel);
-    };
-  }, [roomId]);
+const channel = supabase
+  .channel(`ride-room-${roomId}`)
+  .on(
+    'postgres_changes',
+    {
+      event: '*',
+      schema: 'public',
+      table: 'ride_members',
+      filter: `room_id=eq.${roomId}`,
+    },
+    () => {
+      void loadRiders();
+    }
+  )
+  .on(
+    'postgres_changes',
+    {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'ride_rooms',
+      filter: `id=eq.${roomId}`,
+    },
+    (payload) => {
+      const updatedRoom = payload.new as {
+        id: string;
+        room_code: string;
+        ride_name: string;
+        destination: string | null;
+        created_at: string;
+        status: 'waiting' | 'active' | 'ended';
+      };
+
+      setRoom((current) =>
+        current
+          ? {
+              ...current,
+              name: updatedRoom.ride_name,
+              code: updatedRoom.room_code,
+              destination: updatedRoom.destination ?? '',
+              createdAt: new Date(updatedRoom.created_at).getTime(),
+              status: updatedRoom.status,
+            }
+          : current
+      );
+    }
+  )
+  
+.subscribe((status) => {
+  console.log('Ride room realtime:', status);
+});
+
+return () => {
+  cancelled = true;
+  void supabase.removeChannel(channel);
+};
+}, [roomId]);
+
 
 
   // 5. Fetch every rider's latest GPS location
@@ -342,6 +408,41 @@ useEffect(() => {
                 </p>
               )}
             </div>
+
+            
+<div className="flex flex-col gap-2">
+  <span
+    className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-semibold ${
+      room.status === 'active'
+        ? 'bg-green-100 text-green-700'
+        : room.status === 'ended'
+          ? 'bg-gray-200 text-gray-700'
+          : 'bg-amber-100 text-amber-700'
+    }`}
+  >
+    {room.status === 'active'
+      ? 'Ride Active'
+      : room.status === 'ended'
+        ? 'Ride Ended'
+        : 'Waiting to Start'}
+  </span>
+
+  {room.status === 'waiting' && (
+    <Button onClick={() => updateRideStatus('active')}>
+      Start Ride
+    </Button>
+  )}
+
+  {room.status === 'active' && (
+    <Button
+      variant="secondary"
+      onClick={() => updateRideStatus('ended')}
+    >
+      End Ride
+    </Button>
+  )}
+</div>
+
 
             <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
               <p className="text-xs text-charcoal-muted">Room code</p>
@@ -467,6 +568,8 @@ const riderLocation = locations.find(
 const isLive =
   riderLocation !== undefined &&
   now - new Date(riderLocation.updated_at).getTime() < 30_000;
+
+  
 
 
                   return (

@@ -12,6 +12,7 @@ export interface DemoRoom {
   name: string;
   destination: string;
   createdAt: number;
+  status: 'waiting' | 'active' | 'ended';
 }
 
 const rooms = new Map<string, DemoRoom>();
@@ -33,6 +34,7 @@ export function createDemoRoom(name: string, destination: string): DemoRoom {
     name: name.trim(),
     destination: destination.trim(),
     createdAt: Date.now(),
+    status: 'waiting',
   };
   rooms.set(room.id, room);
   return room;

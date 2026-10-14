@@ -60,25 +60,26 @@ async function handleSubmit(e: FormEvent) {
 
     const code = `RIDE-${segment()}`;
 
-    const { data, error } = await supabase
-      .from('ride_rooms')
-      .insert({
-        room_code: code,
-        ride_name: name.trim(),
-        destination: destination.trim() || null,
-      })
-      .select('id, room_code, ride_name, destination, created_at')
-      .single();
+  const { data, error } = await supabase
+  .from('ride_rooms')
+  .insert({
+    room_code: code,
+    ride_name: name.trim(),
+    destination: destination.trim() || null,
+  })
+  .select('id, room_code, ride_name, destination, created_at, status, created_by')
+  .single();
 
     if (error) throw error;
 
     setRoom({
-      id: data.id,
-      code: data.room_code,
-      name: data.ride_name,
-      destination: data.destination ?? '',
-      createdAt: new Date(data.created_at).getTime(),
-    });
+  id: data.id,
+  code: data.room_code,
+  name: data.ride_name,
+  destination: data.destination ?? '',
+  createdAt: new Date(data.created_at).getTime(),
+  status: data.status ?? 'waiting',
+});
   } catch (error) {
     console.error('Create ride failed:', error);
     alert(
