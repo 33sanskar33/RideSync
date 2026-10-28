@@ -23,6 +23,8 @@ interface RideRoom {
   code: string;
   name: string;
   destination: string;
+  destinationLat: number | null;
+  destinationLng: number | null;
   createdAt: number;
   status: 'waiting' | 'active' | 'ended';
 }
@@ -53,6 +55,8 @@ export default function RoomDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [riders, setRiders] = useState<Rider[]>([]);
   const [locations, setLocations] = useState<RiderLocation[]>([]);
+  const [routeCoordinates, setRouteCoordinates] = useState<[number, number][]>([]);
+  const [routeStatus, setRouteStatus] = useState('');
   
   const [now, setNow] = useState(Date.now());
 
@@ -142,7 +146,7 @@ useEffect(() => {
       try {
         const { data, error } = await supabase
           .from('ride_rooms')
-          .select('id, room_code, ride_name, destination, created_at, status')
+          .select('id, room_code, ride_name, destination, destination_lat, destination_lng, created_at, status')
           .eq('id', roomId)
           .maybeSingle();
 
@@ -156,6 +160,8 @@ useEffect(() => {
                   code: data.room_code,
                   name: data.ride_name,
                   destination: data.destination ?? '',
+                  destinationLat: data.destination_lat ?? null,
+                  destinationLng: data.destination_lng ?? null,
                   createdAt: new Date(data.created_at).getTime(),
                   status: data.status ?? 'waiting',
                 }
@@ -274,6 +280,8 @@ const channel = supabase
         room_code: string;
         ride_name: string;
         destination: string | null;
+        destination_lat: number | null;
+        destination_lng: number | null;
         created_at: string;
         status: 'waiting' | 'active' | 'ended';
       };
@@ -285,6 +293,8 @@ const channel = supabase
               name: updatedRoom.ride_name,
               code: updatedRoom.room_code,
               destination: updatedRoom.destination ?? '',
+              destinationLat: updatedRoom.destination_lat ?? null,
+              destinationLng: updatedRoom.destination_lng ?? null,
               createdAt: new Date(updatedRoom.created_at).getTime(),
               status: updatedRoom.status,
             }
@@ -305,7 +315,49 @@ return () => {
 
 
 
-  // 5. Fetch every rider's latest GPS location
+  // 5. Get a road-following route from the first live rider to the selected destination.
+  useEffect(() => {
+    const start = locations[0];
+    const endLat = room?.destinationLat;
+    const endLng = room?.destinationLng;
+
+    if (!start || endLat == null || endLng == null) {
+      setRouteCoordinates([]);
+      setRouteStatus(
+        endLat == null || endLng == null
+          ? 'Select a destination when creating the ride to show a route.'
+          : 'Waiting for a rider location to calculate the route.',
+      );
+      return;
+    }
+
+    const controller = new AbortController();
+    async function loadRoute() {
+      setRouteStatus('Calculating road route…');
+      try {
+        const url = `https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${endLng},${endLat}?overview=full&geometries=geojson`;
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error('Route service unavailable');
+        const result = await response.json();
+        const coordinates = result?.routes?.[0]?.geometry?.coordinates as [number, number][] | undefined;
+        if (!coordinates || coordinates.length < 2) {
+          throw new Error('No road route found for these locations');
+        }
+        setRouteCoordinates(coordinates.map(([longitude, latitude]) => [latitude, longitude]));
+        setRouteStatus('Road route shown from the first live rider to the destination.');
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        console.error('Load road route failed:', error);
+        setRouteCoordinates([]);
+        setRouteStatus('Could not calculate the road route. Please try again later.');
+      }
+    }
+
+    void loadRoute();
+    return () => controller.abort();
+  }, [locations, room?.destinationLat, room?.destinationLng]);
+
+  // 6. Fetch every rider's latest GPS location
     useEffect(() => {
     if (!roomId) {
       setLocations([]);
@@ -503,8 +555,20 @@ return () => {
               </div>
 
               <div className="h-[380px] w-full">
-                <RideLiveMap locations={locations} />
+                <RideLiveMap
+                  locations={locations}
+                  routeCoordinates={routeCoordinates}
+                  destination={
+                    room.destinationLat != null && room.destinationLng != null
+                      ? { latitude: room.destinationLat, longitude: room.destinationLng }
+                      : null
+                  }
+                />
               </div>
+
+              {routeStatus && (
+                <p className="px-3 pt-2 text-center text-xs text-charcoal-muted">{routeStatus}</p>
+              )}
 
               {locations.length === 0 && (
                 <p className="p-3 text-center text-xs text-charcoal-muted">
