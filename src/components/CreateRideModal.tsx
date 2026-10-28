@@ -17,10 +17,21 @@ interface FormErrors {
   name?: string;
 }
 
+interface DestinationResult {
+  display_name: string;
+  lat: string;
+  lon: string;
+}
+
 export default function CreateRideModal({ open, onClose }: CreateRideModalProps) {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [destination, setDestination] = useState('');
+  const [destinationResults, setDestinationResults] = useState<DestinationResult[]>([]);
+  const [destinationLat, setDestinationLat] = useState<number | null>(null);
+  const [destinationLng, setDestinationLng] = useState<number | null>(null);
+  const [searchingDestination, setSearchingDestination] = useState(false);
+  const [destinationSearchError, setDestinationSearchError] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
   const [loading, setLoading] = useState(false);
   const [room, setRoom] = useState<DemoRoom | null>(null);
@@ -28,6 +39,10 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
   function handleClose() {
     setName('');
     setDestination('');
+    setDestinationResults([]);
+    setDestinationLat(null);
+    setDestinationLng(null);
+    setDestinationSearchError('');
     setErrors({});
     setLoading(false);
     setRoom(null);
@@ -47,8 +62,44 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
     return !next.name;
   }
 
-  
-async function handleSubmit(e: FormEvent) {
+  async function searchDestination() {
+    const query = destination.trim();
+    if (query.length < 3) {
+      setDestinationSearchError('Enter at least 3 characters to search.');
+      setDestinationResults([]);
+      return;
+    }
+
+    setSearchingDestination(true);
+    setDestinationSearchError('');
+    setDestinationResults([]);
+
+    try {
+      const params = new URLSearchParams({
+        q: query,
+        format: 'jsonv2',
+        limit: '5',
+        countrycodes: 'in',
+      });
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?${params.toString()}`
+      );
+      if (!response.ok) throw new Error('Destination search is temporarily unavailable.');
+      const results: DestinationResult[] = await response.json();
+      setDestinationResults(results);
+      if (results.length === 0) {
+        setDestinationSearchError('No places found. Try another search.');
+      }
+    } catch (error) {
+      setDestinationSearchError(
+        error instanceof Error ? error.message : 'Search failed. Try again.'
+      );
+    } finally {
+      setSearchingDestination(false);
+    }
+  }
+
+  async function handleSubmit(e: FormEvent) {
   e.preventDefault();
   if (!validate()) return;
 
@@ -59,6 +110,11 @@ async function handleSubmit(e: FormEvent) {
       Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, '0');
 
     const code = `RIDE-${segment()}`;
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError) throw authError;
+    if (!authData.user) {
+      throw new Error('Please sign in again before creating a ride.');
+    }
 
   const { data, error } = await supabase
   .from('ride_rooms')
@@ -66,6 +122,9 @@ async function handleSubmit(e: FormEvent) {
     room_code: code,
     ride_name: name.trim(),
     destination: destination.trim() || null,
+    destination_lat: destinationLat,
+    destination_lng: destinationLng,
+    created_by: authData.user.id,
   })
   .select('id, room_code, ride_name, destination, created_at, status, created_by')
   .single();
@@ -111,10 +170,10 @@ async function handleSubmit(e: FormEvent) {
             </span>
             <div>
               <p className="text-sm font-semibold text-charcoal">
-                Demo room ready
+                Ride room created
               </p>
               <p className="text-xs text-charcoal-muted">
-                Your room has been created locally for this session.
+                Your room is saved and can be shared with other riders.
               </p>
             </div>
           </div>
@@ -149,17 +208,7 @@ async function handleSubmit(e: FormEvent) {
             </div>
           </div>
 
-          {/* Demo notice */}
-          <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3">
-            <Info
-              className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
-              aria-hidden="true"
-            />
-            <p className="text-xs leading-relaxed text-amber-800">
-              Demo room — not shared across devices. Other riders cannot join
-              this room until RideSync&apos;s backend is connected.
-            </p>
-          </div>
+
 
           {/* Waiting for riders */}
           <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-5 text-center">
@@ -220,27 +269,67 @@ async function handleSubmit(e: FormEvent) {
           maxLength={60}
         />
 
-        <FormField
-          label="Destination (optional)"
-          type="text"
-          placeholder="e.g. Lonavala Lake"
-          value={destination}
-          onChange={(e) => setDestination(e.target.value)}
-          leadingIcon={<MapPin className="h-4.5 w-4.5" />}
-          autoComplete="off"
-          maxLength={80}
-          hint="You can add or change this later."
-        />
-
-        {/* Live location notice */}
-        <div className="flex items-start gap-2.5 rounded-lg bg-gray-50 px-3.5 py-3">
-          <Info
-            className="mt-0.5 h-4 w-4 shrink-0 text-gray-400"
-            aria-hidden="true"
+        <div className="space-y-2">
+          <FormField
+            label="Destination (optional)"
+            type="text"
+            placeholder="Search a place, e.g. Lonavala Lake"
+            value={destination}
+            onChange={(e) => {
+              setDestination(e.target.value);
+              setDestinationLat(null);
+              setDestinationLng(null);
+              setDestinationResults([]);
+              setDestinationSearchError('');
+            }}
+            leadingIcon={<MapPin className="h-4.5 w-4.5" />}
+            autoComplete="off"
+            maxLength={120}
+            hint="Search and select a place to save its map coordinates."
           />
+          <Button
+            type="button"
+            variant="secondary"
+            size="md"
+            fullWidth
+            loading={searchingDestination}
+            onClick={searchDestination}
+          >
+            {searchingDestination ? 'Searching places…' : 'Search destination'}
+          </Button>
+          {destinationSearchError && (
+            <p className="text-xs text-red-600" role="status">{destinationSearchError}</p>
+          )}
+          {destinationResults.length > 0 && (
+            <div className="max-h-52 overflow-y-auto rounded-xl border border-gray-200 bg-white">
+              {destinationResults.map((result) => (
+                <button
+                  key={`${result.lat},${result.lon},${result.display_name}`}
+                  type="button"
+                  className="flex w-full items-start gap-2 border-b border-gray-100 px-3 py-3 text-left text-sm last:border-b-0 hover:bg-gray-50"
+                  onClick={() => {
+                    setDestination(result.display_name);
+                    setDestinationLat(Number(result.lat));
+                    setDestinationLng(Number(result.lon));
+                    setDestinationResults([]);
+                    setDestinationSearchError('');
+                  }}
+                >
+                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-ridesync-600" />
+                  <span>{result.display_name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {destinationLat !== null && destinationLng !== null && (
+            <p className="text-xs text-green-700" role="status">Destination selected and ready to save.</p>
+          )}
+        </div>
+
+        <div className="flex items-start gap-2.5 rounded-lg bg-gray-50 px-3.5 py-3">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
           <p className="text-xs leading-relaxed text-charcoal-muted">
-            Live location sharing will be added in a later step. For now, rooms
-            are created locally in your browser.
+            Your ride is saved to RideSync. Riders can join using the room code.
           </p>
         </div>
 
