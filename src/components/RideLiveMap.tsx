@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import {
   CircleMarker,
+  Polyline,
   MapContainer,
   Popup,
   TileLayer,
@@ -20,6 +21,8 @@ export interface RiderLocation {
 
 interface RideLiveMapProps {
   locations: RiderLocation[];
+  routeCoordinates?: [number, number][];
+  destination?: { latitude: number; longitude: number } | null;
 }
 
 const RIDER_COLORS = [
@@ -144,6 +147,8 @@ function RiderMarker({ rider }: { rider: RiderLocation }) {
 
 export default function RideLiveMap({
   locations,
+  routeCoordinates = [],
+  destination = null,
 }: RideLiveMapProps) {
   const initialCenter: [number, number] =
     locations.length > 0
@@ -163,6 +168,20 @@ export default function RideLiveMap({
       />
 
       <FitMapToRiders locations={locations} />
+
+      {routeCoordinates.length > 1 && (
+        <Polyline positions={routeCoordinates} pathOptions={{ color: '#2563eb', weight: 5, opacity: 0.8 }} />
+      )}
+
+      {destination && (
+        <CircleMarker
+          center={[destination.latitude, destination.longitude]}
+          radius={8}
+          pathOptions={{ color: '#ffffff', weight: 2, fillColor: '#dc2626', fillOpacity: 1 }}
+        >
+          <Popup><strong>Destination</strong></Popup>
+        </CircleMarker>
+      )}
 
       {locations.map((rider) => (
         <RiderMarker key={rider.id} rider={rider} />
