@@ -1,12 +1,12 @@
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Mail } from 'lucide-react';
 import AuthLayout from '@/components/AuthLayout';
 import FormField from '@/components/FormField';
 import PasswordInput from '@/components/PasswordInput';
 import Button from '@/components/Button';
 import Checkbox from '@/components/Checkbox';
-import DemoNotice from '@/components/DemoNotice';
+import { supabase } from '@/lib/supabase';
 import { validateEmail, validateRequired } from '@/utils/validation';
 
 interface FormErrors {
@@ -15,11 +15,12 @@ interface FormErrors {
 }
 
 export default function LoginPage() {
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
   const [errors, setErrors] = useState<FormErrors>({});
-  const [submitted, setSubmitted] = useState(false);
+  const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
   function validate(): boolean {
@@ -33,12 +34,28 @@ export default function LoginPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setSubmitted(true);
+    setMessage('');
     if (!validate()) return;
 
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 900));
-    setLoading(false);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) throw error;
+
+      navigate('/dashboard', { replace: true });
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : 'Could not sign in. Please try again.',
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -47,8 +64,10 @@ export default function LoginPage() {
       subtitle="Sign in to get ready for your next group ride."
     >
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
-        {submitted && !loading && !errors.email && !errors.password && (
-          <DemoNotice message="Authentication is not connected yet — this is a frontend-only prototype. Your credentials were not checked or stored." />
+        {message && (
+          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {message}
+          </p>
         )}
 
         <FormField
