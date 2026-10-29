@@ -48,14 +48,14 @@ language sql
 stable
 security definer
 set search_path = public, pg_temp
-as $
+as $$
   select exists (
     select 1
     from public.ride_members m
     where m.room_id = target_room_id
       and m.user_id = auth.uid()
   );
-$;
+$$;
 
 create or replace function public.is_ride_room_creator(target_room_id uuid)
 returns boolean
@@ -63,14 +63,14 @@ language sql
 stable
 security definer
 set search_path = public, pg_temp
-as $
+as $$
   select exists (
     select 1
     from public.ride_rooms r
     where r.id = target_room_id
       and r.created_by = auth.uid()
   );
-$;
+$$;
 
 create or replace function public.is_ride_member_name(
   target_room_id uuid,
@@ -81,7 +81,7 @@ language sql
 stable
 security definer
 set search_path = public, pg_temp
-as $
+as $$
   select exists (
     select 1
     from public.ride_members m
@@ -89,7 +89,7 @@ as $
       and m.user_id = auth.uid()
       and m.rider_name = target_rider_name
   );
-$;
+$$;
 
 revoke all on function public.is_ride_room_member(uuid) from public, anon;
 revoke all on function public.is_ride_room_creator(uuid) from public, anon;
