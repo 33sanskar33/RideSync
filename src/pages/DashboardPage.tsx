@@ -40,14 +40,6 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout>
-      {/* Demo banner */}
-      <div className="mb-6 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5">
-        <span className="inline-flex h-2 w-2 shrink-0 rounded-full bg-amber-400" aria-hidden="true" />
-        <p className="text-xs font-medium text-amber-800">
-          Demo mode — authentication is not connected yet. This dashboard is for preview only.
-        </p>
-      </div>
-
       {/* Welcome section */}
       <section className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight text-charcoal sm:text-3xl">
@@ -137,9 +129,6 @@ export default function DashboardPage() {
       <section aria-label="How RideSync works">
         <div className="mb-4 flex items-center gap-2">
           <h2 className="text-lg font-semibold text-charcoal">How RideSync works</h2>
-          <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-charcoal-muted">
-            Preview
-          </span>
         </div>
         <div className="grid gap-4 sm:grid-cols-3">
           {howItWorks.map((item) => {
@@ -167,9 +156,6 @@ export default function DashboardPage() {
             );
           })}
         </div>
-        <p className="mt-3 text-xs text-charcoal-muted">
-          This is a preview of the planned workflow — these features are not yet operational.
-        </p>
       </section>
 
       {/* Modals */}

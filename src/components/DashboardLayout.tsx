@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, User, Settings, LogOut, Menu, X } from 'lucide-react';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase';
 import Logo from './Logo';
 import Avatar from './Avatar';
 
@@ -8,15 +10,12 @@ interface DashboardLayoutProps {
   children: ReactNode;
 }
 
-/** Demo display name — clearly labelled as demo data */
-const DEMO_DISPLAY_NAME = 'Rider';
-const DEMO_INITIALS = 'RD';
-
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const [profileOpen, setProfileOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
   // Close profile dropdown on outside click
@@ -38,10 +37,60 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     setMobileNavOpen(false);
   }, [location.pathname]);
 
-  function handleSignOut() {
+  useEffect(() => {
+    let active = true;
+
+    void supabase.auth.getUser().then(({ data, error }) => {
+      if (!active) return;
+      if (error) console.error('Could not load signed-in user:', error.message);
+      setUser(data.user);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (active) setUser(session?.user ?? null);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const displayName =
+    (typeof user?.user_metadata?.full_name === 'string' &&
+      user.user_metadata.full_name.trim()) ||
+    user?.email?.split('@')[0] ||
+    'Guest rider';
+  const displayEmail = user?.email ?? 'Not signed in';
+  const initials =
+    displayName
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? '')
+      .join('') || 'GR';
+
+  async function handleSignOut() {
     setProfileOpen(false);
     setMobileNavOpen(false);
-    navigate('/login');
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      console.error('Sign out failed:', error.message);
+      window.alert('Could not sign out. Please try again.');
+      return;
+    }
+    navigate('/login', { replace: true });
+  }
+
+  function handleAccountAction() {
+    if (user) {
+      void handleSignOut();
+    } else {
+      setProfileOpen(false);
+      setMobileNavOpen(false);
+      navigate('/login');
+    }
   }
 
   const isActive = (path: string) =>
@@ -90,9 +139,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 aria-expanded={profileOpen}
                 aria-haspopup="menu"
               >
-                <Avatar initials={DEMO_INITIALS} size="sm" />
+                <Avatar initials={initials} size="sm" />
                 <span className="text-sm font-medium text-charcoal-soft">
-                  {DEMO_DISPLAY_NAME}
+                  {displayName}
                 </span>
               </button>
 
@@ -103,8 +152,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   aria-label="Profile menu"
                 >
                   <div className="border-b border-gray-100 px-4 py-3">
-                    <p className="text-sm font-medium text-charcoal">Demo Rider</p>
-                    <p className="text-xs text-charcoal-muted">Demo account — not signed in</p>
+                    <p className="text-sm font-medium text-charcoal">{displayName}</p>
+                    <p className="break-all text-xs text-charcoal-muted">{displayEmail}</p>
                   </div>
                   <Link
                     to="/dashboard/profile"
@@ -126,12 +175,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   </Link>
                   <button
                     type="button"
-                    onClick={handleSignOut}
+                    onClick={handleAccountAction}
                     className="flex w-full items-center gap-2.5 border-t border-gray-100 px-4 py-2.5 text-sm text-charcoal-soft transition-colors hover:bg-gray-50"
                     role="menuitem"
                   >
                     <LogOut className="h-4 w-4 text-gray-400" aria-hidden="true" />
-                    Sign out
+                    {user ? 'Sign out' : 'Sign in'}
                   </button>
                 </div>
               )}
@@ -159,10 +208,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           <div className="border-t border-gray-200 bg-white md:hidden" aria-label="Mobile navigation">
             <div className="space-y-1 px-4 py-3">
               <div className="mb-2 flex items-center gap-2.5 rounded-lg px-3 py-2">
-                <Avatar initials={DEMO_INITIALS} size="sm" />
+                <Avatar initials={initials} size="sm" />
                 <div>
-                  <p className="text-sm font-medium text-charcoal">Demo Rider</p>
-                  <p className="text-xs text-charcoal-muted">Demo account</p>
+                  <p className="truncate text-sm font-medium text-charcoal">{displayName}</p>
+                  <p className="truncate text-xs text-charcoal-muted">{displayEmail}</p>
                 </div>
               </div>
               {navLinks.map((link) => {
@@ -185,11 +234,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               })}
               <button
                 type="button"
-                onClick={handleSignOut}
+                onClick={handleAccountAction}
                 className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm font-medium text-charcoal-soft transition-colors hover:bg-gray-100"
               >
                 <LogOut className="h-4 w-4" aria-hidden="true" />
-                Sign out
+                {user ? 'Sign out' : 'Sign in'}
               </button>
             </div>
           </div>
