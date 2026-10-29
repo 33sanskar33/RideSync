@@ -121,14 +121,6 @@ export default function LoginPage() {
         </Link>
       </p>
 
-      <div className="mt-4 border-t border-gray-200 pt-4 text-center">
-        <Link
-          to="/dashboard"
-          className="text-xs font-medium text-charcoal-muted transition-colors hover:text-ridesync-700 hover:underline"
-        >
-          Preview the dashboard (demo)
-        </Link>
-      </div>
     </AuthLayout>
   );
 }
