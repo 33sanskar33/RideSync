@@ -4,6 +4,7 @@ import { ArrowLeft, Mail, CheckCircle2 } from 'lucide-react';
 import AuthLayout from '@/components/AuthLayout';
 import FormField from '@/components/FormField';
 import Button from '@/components/Button';
+import { supabase } from '@/lib/supabase';
 import { validateEmail } from '@/utils/validation';
 
 export default function ForgotPasswordPage() {
@@ -14,14 +15,34 @@ export default function ForgotPasswordPage() {
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    const err = validateEmail(email);
-    setError(err);
-    if (err) return;
+    setError(undefined);
+
+    const validationError = validateEmail(email);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
 
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 900));
-    setLoading(false);
-    setSuccess(true);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        {
+          redirectTo: `${window.location.origin}/reset-password`,
+        },
+      );
+
+      if (resetError) throw resetError;
+      setSuccess(true);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Could not send the reset email. Please try again.',
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   function handleReset() {
@@ -33,35 +54,23 @@ export default function ForgotPasswordPage() {
   if (success) {
     return (
       <AuthLayout
-        title="Reset your password"
-        subtitle="Enter your email to receive a reset link."
+        title="Check your email"
+        subtitle="If an account exists for that email, a password reset link will arrive shortly."
       >
         <div className="text-center">
           <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-ridesync-50">
-            <CheckCircle2
-              className="h-7 w-7 text-ridesync-600"
-              aria-hidden="true"
-            />
+            <CheckCircle2 className="h-7 w-7 text-ridesync-600" aria-hidden="true" />
           </div>
           <h2 className="text-lg font-semibold text-charcoal">
-            Reset link ready
+            Reset email requested
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-charcoal-muted">
-            This is a frontend-only demo — no reset email was sent. In the full
-            application, a password reset link would be delivered to{' '}
-            <span className="font-medium text-charcoal-soft">
-              {email || 'your email'}
-            </span>
-            .
+            Check the inbox for <span className="font-medium text-charcoal-soft">{email}</span>,
+            including the spam folder. Open the link on this device to choose a new password.
           </p>
 
           <div className="mt-6 space-y-3">
-            <Button
-              variant="secondary"
-              size="lg"
-              fullWidth
-              onClick={handleReset}
-            >
+            <Button variant="secondary" size="lg" fullWidth onClick={handleReset}>
               Try a different email
             </Button>
             <Link
@@ -80,9 +89,15 @@ export default function ForgotPasswordPage() {
   return (
     <AuthLayout
       title="Reset your password"
-      subtitle="Enter your email and we'll send you a link to reset it."
+      subtitle="Enter your account email and we'll send you a secure reset link."
     >
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        {error && (
+          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </p>
+        )}
+
         <FormField
           label="Email"
           type="email"
@@ -90,7 +105,6 @@ export default function ForgotPasswordPage() {
           placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          error={error}
           leadingIcon={<Mail className="h-4.5 w-4.5" />}
           required
         />
