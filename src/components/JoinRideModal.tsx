@@ -58,30 +58,24 @@ async function handleSubmit(e: FormEvent) {
   setLoading(true);
 
   try {
-    const { data: room, error: roomError } = await supabase
-      .from('ride_rooms')
-      .select('id, room_code')
-      .eq('room_code', normalized)
-      .maybeSingle();
+    const { data: joinedRooms, error: joinError } = await supabase.rpc(
+      'join_ride_room_by_code',
+      {
+        requested_room_code: normalized,
+        requested_rider_name: name,
+      },
+    );
 
-    if (roomError) throw roomError;
+    if (joinError) throw joinError;
 
-    if (!room) {
+    const joinedRoom = joinedRooms?.[0];
+    if (!joinedRoom) {
       setError('No ride found with this code. Check with the organiser.');
       return;
     }
 
-    const { error: memberError } = await supabase
-      .from('ride_members')
-      .insert({
-        room_id: room.id,
-        rider_name: name,
-      });
-
-    if (memberError) throw memberError;
-
     handleClose();
-    navigate(`/room/${room.id}`, {
+    navigate(`/room/${joinedRoom.joined_room_id}`, {
   state: { riderName: name },
 });
   } catch (err) {
