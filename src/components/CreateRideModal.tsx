@@ -143,11 +143,17 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
       });
     } catch (error) {
       console.error('Create ride failed:', error);
-      alert(
+      // Supabase/PostgREST errors are plain objects, not always Error instances.
+      const message =
         error instanceof Error
           ? error.message
-          : 'Could not create ride. Please try again.',
-      );
+          : typeof error === 'object' &&
+              error !== null &&
+              'message' in error &&
+              typeof error.message === 'string'
+            ? error.message
+            : 'Could not create ride. Please try again.';
+      alert(message);
     } finally {
       setLoading(false);
     }
