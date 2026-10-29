@@ -27,6 +27,7 @@ interface RideRoom {
   destinationLng: number | null;
   createdAt: number;
   status: 'waiting' | 'active' | 'ended';
+  createdBy: string | null;
 }
 
 interface Rider {
@@ -52,6 +53,7 @@ export default function RoomDetailsPage() {
     useState('Location not started');
 
   const [room, setRoom] = useState<RideRoom | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [riders, setRiders] = useState<Rider[]>([]);
   const [locations, setLocations] = useState<RiderLocation[]>([]);
@@ -146,7 +148,7 @@ useEffect(() => {
       try {
         const { data, error } = await supabase
           .from('ride_rooms')
-          .select('id, room_code, ride_name, destination, destination_lat, destination_lng, created_at, status')
+          .select('id, room_code, ride_name, destination, destination_lat, destination_lng, created_at, status, created_by')
           .eq('id', roomId)
           .maybeSingle();
 
@@ -164,6 +166,7 @@ useEffect(() => {
                   destinationLng: data.destination_lng ?? null,
                   createdAt: new Date(data.created_at).getTime(),
                   status: data.status ?? 'waiting',
+                  createdBy: data.created_by ?? null,
                 }
               : null
           );
@@ -479,19 +482,23 @@ return () => {
         : 'Waiting to Start'}
   </span>
 
-  {room.status === 'waiting' && (
+  {isRideLeader && room.status === 'waiting' && (
     <Button onClick={() => updateRideStatus('active')}>
       Start Ride
     </Button>
   )}
 
-  {room.status === 'active' && (
+  {isRideLeader && room.status === 'active' && (
     <Button
       variant="secondary"
       onClick={() => updateRideStatus('ended')}
     >
       End Ride
     </Button>
+  )}
+
+  {!isRideLeader && room.status !== 'ended' && (
+    <p className="text-xs text-charcoal-muted">Only the ride organiser can control ride status.</p>
   )}
 </div>
 

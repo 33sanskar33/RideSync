@@ -108,6 +108,12 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
 
     setLoading(true);
     try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      if (!authData.user) {
+        throw new Error('Please sign in before creating a ride.');
+      }
+
       const segment = () =>
         Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, '0');
       const code = `RIDE-${segment()}`;
@@ -115,6 +121,7 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
       const { data, error } = await supabase
         .from('ride_rooms')
         .insert({
+          created_by: authData.user.id,
           room_code: code,
           ride_name: name.trim(),
           destination: destination.trim() || null,
