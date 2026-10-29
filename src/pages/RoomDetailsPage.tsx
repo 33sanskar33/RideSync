@@ -63,8 +63,33 @@ export default function RoomDetailsPage() {
   const [now, setNow] = useState(Date.now());
 
   
+useEffect(() => {
+  let active = true;
+
+  void supabase.auth.getUser().then(({ data, error }) => {
+    if (!active) return;
+    if (error) {
+      console.error('Could not verify ride leader:', error.message);
+    }
+    setCurrentUserId(data.user?.id ?? null);
+  });
+
+  return () => {
+    active = false;
+  };
+}, []);
+
+const isRideLeader = Boolean(
+  room?.createdBy &&
+  currentUserId &&
+  room.createdBy === currentUserId
+);
+
 const updateRideStatus = async (status: 'active' | 'ended') => {
-  if (!room) return;
+  if (!room || !isRideLeader) {
+    alert('Only the person who created this ride can start or end it.');
+    return;
+  }
 
   try {
     const { data, error } = await supabase
