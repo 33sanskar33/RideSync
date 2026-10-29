@@ -40,6 +40,64 @@ begin
   end loop;
 end $$;
 
+-- SECURITY DEFINER helpers avoid recursive RLS policy evaluation when
+-- checking membership and ownership across these related tables.
+create or replace function public.is_ride_room_member(target_room_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $
+  select exists (
+    select 1
+    from public.ride_members m
+    where m.room_id = target_room_id
+      and m.user_id = auth.uid()
+  );
+$;
+
+create or replace function public.is_ride_room_creator(target_room_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $
+  select exists (
+    select 1
+    from public.ride_rooms r
+    where r.id = target_room_id
+      and r.created_by = auth.uid()
+  );
+$;
+
+create or replace function public.is_ride_member_name(
+  target_room_id uuid,
+  target_rider_name text
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $
+  select exists (
+    select 1
+    from public.ride_members m
+    where m.room_id = target_room_id
+      and m.user_id = auth.uid()
+      and m.rider_name = target_rider_name
+  );
+$;
+
+revoke all on function public.is_ride_room_member(uuid) from public, anon;
+revoke all on function public.is_ride_room_creator(uuid) from public, anon;
+revoke all on function public.is_ride_member_name(uuid, text) from public, anon;
+grant execute on function public.is_ride_room_member(uuid) to authenticated;
+grant execute on function public.is_ride_room_creator(uuid) to authenticated;
+grant execute on function public.is_ride_member_name(uuid, text) to authenticated;
+
 create policy "Authenticated users create rooms as themselves"
   on public.ride_rooms
   for insert
@@ -58,13 +116,8 @@ create policy "Room members and creator can view room"
   for select
   to authenticated
   using (
-    created_by = (select auth.uid())
-    or exists (
-      select 1
-      from public.ride_members m
-      where m.room_id = ride_rooms.id
-        and m.user_id = (select auth.uid())
-    )
+    public.is_ride_room_creator(id)
+    or public.is_ride_room_member(id)
   );
 
 create policy "Room members and creator can view members"
@@ -72,19 +125,8 @@ create policy "Room members and creator can view members"
   for select
   to authenticated
   using (
-    user_id = (select auth.uid())
-    or exists (
-      select 1
-      from public.ride_rooms r
-      where r.id = ride_members.room_id
-        and r.created_by = (select auth.uid())
-    )
-    or exists (
-      select 1
-      from public.ride_members mine
-      where mine.room_id = ride_members.room_id
-        and mine.user_id = (select auth.uid())
-    )
+    public.is_ride_room_creator(room_id)
+    or public.is_ride_room_member(room_id)
   );
 
 create policy "Room members and creator can view locations"
@@ -92,19 +134,8 @@ create policy "Room members and creator can view locations"
   for select
   to authenticated
   using (
-    user_id = (select auth.uid())
-    or exists (
-      select 1
-      from public.ride_rooms r
-      where r.id = ride_locations.room_id
-        and r.created_by = (select auth.uid())
-    )
-    or exists (
-      select 1
-      from public.ride_members mine
-      where mine.room_id = ride_locations.room_id
-        and mine.user_id = (select auth.uid())
-    )
+    public.is_ride_room_creator(room_id)
+    or public.is_ride_room_member(room_id)
   );
 
 create policy "Members can insert their own location"
@@ -113,13 +144,7 @@ create policy "Members can insert their own location"
   to authenticated
   with check (
     user_id = (select auth.uid())
-    and exists (
-      select 1
-      from public.ride_members m
-      where m.room_id = ride_locations.room_id
-        and m.user_id = (select auth.uid())
-        and m.rider_name = ride_locations.rider_name
-    )
+    and public.is_ride_member_name(room_id, rider_name)
     and latitude between -90 and 90
     and longitude between -180 and 180
   );
@@ -130,23 +155,11 @@ create policy "Members can update their own location"
   to authenticated
   using (
     user_id = (select auth.uid())
-    and exists (
-      select 1
-      from public.ride_members m
-      where m.room_id = ride_locations.room_id
-        and m.user_id = (select auth.uid())
-        and m.rider_name = ride_locations.rider_name
-    )
+    and public.is_ride_member_name(room_id, rider_name)
   )
   with check (
     user_id = (select auth.uid())
-    and exists (
-      select 1
-      from public.ride_members m
-      where m.room_id = ride_locations.room_id
-        and m.user_id = (select auth.uid())
-        and m.rider_name = ride_locations.rider_name
-    )
+    and public.is_ride_member_name(room_id, rider_name)
     and latitude between -90 and 90
     and longitude between -180 and 180
   );
