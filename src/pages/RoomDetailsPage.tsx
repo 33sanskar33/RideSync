@@ -59,6 +59,11 @@ export default function RoomDetailsPage() {
   const [locations, setLocations] = useState<RiderLocation[]>([]);
   const [routeCoordinates, setRouteCoordinates] = useState<[number, number][]>([]);
   const [routeStatus, setRouteStatus] = useState('');
+  const [distanceUnit, setDistanceUnit] = useState<'km' | 'mi'>('km');
+  const [routeSummary, setRouteSummary] = useState<{
+    distanceMeters: number;
+    durationSeconds: number;
+  } | null>(null);
   
   const [now, setNow] = useState(Date.now());
 
@@ -72,6 +77,10 @@ useEffect(() => {
       console.error('Could not verify ride leader:', error.message);
     }
     setCurrentUserId(data.user?.id ?? null);
+    const savedDistanceUnit = data.user?.user_metadata?.distance_unit;
+    if (savedDistanceUnit === 'km' || savedDistanceUnit === 'mi') {
+      setDistanceUnit(savedDistanceUnit);
+    }
   });
 
   return () => {
@@ -82,7 +91,8 @@ useEffect(() => {
 const isRideLeader = Boolean(
   room?.createdBy &&
   currentUserId &&
-  room.createdBy === currentUserId
+  room.createdBy === currentUserId &&
+  !riderName
 );
 
 const updateRideStatus = async (status: 'active' | 'ended') => {
@@ -351,6 +361,7 @@ return () => {
 
     if (!start || endLat == null || endLng == null) {
       setRouteCoordinates([]);
+      setRouteSummary(null);
       setRouteStatus(
         endLat == null || endLng == null
           ? 'Select a destination when creating the ride to show a route.'
@@ -367,16 +378,27 @@ return () => {
         const response = await fetch(url, { signal: controller.signal });
         if (!response.ok) throw new Error('Route service unavailable');
         const result = await response.json();
-        const coordinates = result?.routes?.[0]?.geometry?.coordinates as [number, number][] | undefined;
+        const route = result?.routes?.[0] as {
+          geometry?: { coordinates?: [number, number][] };
+          distance?: number;
+          duration?: number;
+        } | undefined;
+        const coordinates = route?.geometry?.coordinates;
         if (!coordinates || coordinates.length < 2) {
           throw new Error('No road route found for these locations');
         }
         setRouteCoordinates(coordinates.map(([longitude, latitude]) => [latitude, longitude]));
+        setRouteSummary(
+          typeof route.distance === 'number' && typeof route.duration === 'number'
+            ? { distanceMeters: route.distance, durationSeconds: route.duration }
+            : null,
+        );
         setRouteStatus('Road route shown from the first live rider to the destination.');
       } catch (error) {
         if (controller.signal.aborted) return;
         console.error('Load road route failed:', error);
         setRouteCoordinates([]);
+        setRouteSummary(null);
         setRouteStatus('Could not calculate the road route. Please try again later.');
       }
     }
@@ -419,6 +441,18 @@ return () => {
       window.clearInterval(intervalId);
     };
   }, [roomId]);
+
+  const formatRouteDistance = (meters: number) =>
+    distanceUnit === 'mi'
+      ? `${(meters / 1609.344).toFixed(1)} mi`
+      : `${(meters / 1000).toFixed(1)} km`;
+
+  const formatRouteDuration = (seconds: number) => {
+    const totalMinutes = Math.max(1, Math.round(seconds / 60));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return hours > 0 ? `${hours} h ${minutes} min` : `${totalMinutes} min`;
+  };
 
   if (loading) {
     return (
@@ -608,6 +642,24 @@ return () => {
                 </p>
               )}
             </div>
+
+            {routeSummary && (
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
+                  <p className="text-xs text-charcoal-muted">Route distance</p>
+                  <p className="mt-1 text-lg font-bold text-charcoal">
+                    {formatRouteDistance(routeSummary.distanceMeters)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
+                  <p className="text-xs text-charcoal-muted">Estimated moving time</p>
+                  <p className="mt-1 text-lg font-bold text-charcoal">
+                    {formatRouteDuration(routeSummary.durationSeconds)}
+                  </p>
+                  <p className="mt-1 text-xs text-charcoal-muted">Route estimate, not live traffic</p>
+                </div>
+              </div>
+            )}
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-4">
