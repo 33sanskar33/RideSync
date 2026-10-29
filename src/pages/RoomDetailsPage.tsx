@@ -223,7 +223,7 @@ useEffect(() => {
 
   // 3. Save this rider's GPS coordinates
   useEffect(() => {
-    if (!room?.id || !riderName || !myLocation) return;
+    if (!room?.id || !riderName || !myLocation || !currentUserId) return;
 
     let cancelled = false;
 
@@ -233,12 +233,13 @@ useEffect(() => {
         .upsert(
           {
             room_id: room!.id,
+            user_id: currentUserId,
             rider_name: riderName!,
             latitude: myLocation!.latitude,
             longitude: myLocation!.longitude,
             updated_at: new Date().toISOString(),
           },
-          { onConflict: 'room_id,rider_name' }
+          { onConflict: 'room_id,user_id' }
         );
 
       if (cancelled) return;
@@ -256,7 +257,7 @@ useEffect(() => {
     return () => {
       cancelled = true;
     };
-  }, [room?.id, riderName, myLocation]);
+  }, [room?.id, riderName, myLocation, currentUserId]);
 
   // 4. Load riders
   
