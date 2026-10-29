@@ -6,6 +6,7 @@ import DashboardPage from '@/pages/DashboardPage';
 import ProfilePage from '@/pages/ProfilePage';
 import SettingsPage from '@/pages/SettingsPage';
 import RoomDetailsPage from '@/pages/RoomDetailsPage';
+import ProtectedRoute from '@/components/ProtectedRoute';
 
 export default function App() {
   return (
@@ -14,9 +15,11 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/dashboard" element={<DashboardPage />} />
-      <Route path="/dashboard/profile" element={<ProfilePage />} />
-      <Route path="/dashboard/settings" element={<SettingsPage />} />
+      <Route element={<ProtectedRoute />}>
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/dashboard/profile" element={<ProfilePage />} />
+        <Route path="/dashboard/settings" element={<SettingsPage />} />
+      </Route>
       <Route path="/room/:roomId" element={<RoomDetailsPage />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
