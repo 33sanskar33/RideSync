@@ -284,7 +284,7 @@ export default function RideGroupChat({
           </div>
         ) : (
           messages.map((message) => {
-            const isMine = message.user_id === userId;
+            const isMine = message.member_id === memberId;
             return (
               <div
                 key={message.id}
