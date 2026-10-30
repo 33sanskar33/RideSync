@@ -92,8 +92,11 @@ export default function RoomDetailsPage() {
   const [speedometerOffset, setSpeedometerOffset] = useState({ x: 0, y: 0 });
   const speedometerDrag = useRef<{ pointerX: number; pointerY: number; offsetX: number; offsetY: number } | null>(null);
 
-  const [locationStatus, setLocationStatus] =
-    useState('Location not started');
+  const [gpsStatus, setGpsStatus] = useState('Waiting for GPS fix');
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [lastGpsUpdateAt, setLastGpsUpdateAt] = useState<number | null>(null);
+  const [gpsWatchAttempt, setGpsWatchAttempt] = useState(0);
+  const [locationStatus, setLocationStatus] = useState('Waiting to share location');
 
   const [room, setRoom] = useState<RideRoom | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -284,14 +287,14 @@ useEffect(() => {
   return () => window.clearInterval(interval);
 }, []);
 
-  // 1. Read GPS location from this device
+  // 1. Read GPS location from this device. The retry button restarts this watcher.
   useEffect(() => {
     if (!navigator.geolocation) {
-      setLocationStatus('GPS is not supported by this browser');
+      setGpsStatus('GPS is not supported by this browser');
       return;
     }
 
-    setLocationStatus('Requesting location permission...');
+    setGpsStatus('Requesting GPS permission…');
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
@@ -299,30 +302,40 @@ useEffect(() => {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         });
+        setGpsAccuracy(
+          Number.isFinite(position.coords.accuracy)
+            ? position.coords.accuracy
+            : null
+        );
+        setLastGpsUpdateAt(Date.now());
         setSpeedMetersPerSecond(
           typeof position.coords.speed === 'number' && Number.isFinite(position.coords.speed)
             ? Math.max(0, position.coords.speed)
             : null
         );
-        setLocationStatus('Location active');
+        setGpsStatus('GPS signal received');
       },
       (error) => {
         setSpeedMetersPerSecond(null);
-        setLocationStatus(
-          error.code === 1
-            ? 'Location permission denied'
-            : 'Unable to get location'
-        );
+        if (error.code === 1) {
+          setGpsStatus('Location permission denied. Allow location access in browser settings.');
+        } else if (error.code === 2) {
+          setGpsStatus('GPS position unavailable. Move near an open area and retry.');
+        } else if (error.code === 3) {
+          setGpsStatus('GPS is taking too long. Waiting for another fix…');
+        } else {
+          setGpsStatus('Could not read GPS location. Please retry.');
+        }
       },
       {
         enableHighAccuracy: true,
         maximumAge: 3000,
-        timeout: 15000,
+        timeout: 20000,
       }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, []);
+  }, [gpsWatchAttempt]);
 
   // 2. Load room details
   useEffect(() => {
@@ -1020,20 +1033,51 @@ return () => {
           </div>
         </div>
 
-        {/* GPS status */}
+        {/* GPS and location-sharing status */}
         <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <div className="flex items-center gap-2">
-            <LocateFixed className="h-5 w-5 text-blue-700" />
-            <p className="text-sm font-semibold text-blue-900">
-              {locationStatus}
-            </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <LocateFixed className="h-5 w-5 shrink-0 text-blue-700" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-blue-900">
+                  {lastGpsUpdateAt && now - lastGpsUpdateAt > 20000
+                    ? 'GPS signal is stale — waiting for a fresh fix'
+                    : gpsStatus}
+                </p>
+                <p className="mt-0.5 text-xs text-blue-800">
+                  Location sharing: {locationStatus}
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setLastGpsUpdateAt(null);
+                setGpsAccuracy(null);
+                setGpsStatus('Restarting GPS…');
+                setGpsWatchAttempt((attempt) => attempt + 1);
+              }}
+              disabled={!navigator.geolocation}
+            >
+              Retry GPS
+            </Button>
           </div>
 
           {myLocation && (
-            <p className="mt-2 text-xs text-blue-800">
-              Your coordinates: {myLocation.latitude.toFixed(5)},{' '}
-              {myLocation.longitude.toFixed(5)}
-            </p>
+            <div className="mt-2 space-y-1 text-xs text-blue-800">
+              <p>
+                Your coordinates: {myLocation.latitude.toFixed(5)},{' '}
+                {myLocation.longitude.toFixed(5)}
+              </p>
+              {gpsAccuracy !== null && (
+                <p>GPS accuracy: approximately ±{Math.round(gpsAccuracy)} metres</p>
+              )}
+              {lastGpsUpdateAt !== null && (
+                <p>Last GPS fix: {new Date(lastGpsUpdateAt).toLocaleTimeString()}</p>
+              )}
+            </div>
           )}
 
           {!activeRiderName && (
