@@ -34,6 +34,7 @@ interface Rider {
   rider_name: string;
   joined_at: string;
   user_id?: string | null;
+  is_leader?: boolean;
 }
 
 export default function RoomDetailsPage() {
@@ -144,11 +145,43 @@ useEffect(() => {
   };
 }, [roomId, activeMemberId]);
 
+// If the creator opens the room from a fresh tab, restore their leader rider profile.
+useEffect(() => {
+  if (!roomId || !room?.createdBy || !currentUserId) return;
+  if (room.createdBy !== currentUserId || activeMemberId) return;
+
+  let cancelled = false;
+  async function loadLeaderMembership() {
+    const { data, error } = await supabase
+      .from('ride_members')
+      .select('id, rider_name')
+      .eq('room_id', roomId)
+      .eq('user_id', currentUserId)
+      .eq('is_leader', true)
+      .maybeSingle();
+
+    if (cancelled) return;
+    if (error) {
+      console.error('Load leader membership failed:', error.message);
+      return;
+    }
+    if (data) {
+      setMembershipRiderName(data.rider_name);
+      setActiveMemberId(data.id);
+      sessionStorage.setItem(`ridesync-active-member-${roomId}`, data.id);
+    }
+  }
+
+  void loadLeaderMembership();
+  return () => {
+    cancelled = true;
+  };
+}, [roomId, room?.createdBy, currentUserId, activeMemberId]);
+
 const isRideLeader = Boolean(
   room?.createdBy &&
   currentUserId &&
   room.createdBy === currentUserId &&
-  !activeRiderName
 );
 
 const updateRideStatus = async (status: 'active' | 'ended') => {
@@ -336,7 +369,7 @@ useEffect(() => {
     async function loadRiders() {
       const { data, error } = await supabase
         .from('ride_members')
-        .select('id, rider_name, joined_at, user_id')
+        .select('id, rider_name, joined_at, user_id, is_leader')
         .eq('room_id', roomId)
         .order('joined_at', { ascending: true });
 
@@ -796,7 +829,12 @@ return () => {
 
               <div className="h-[380px] w-full">
                 <RideLiveMap
-                  locations={locations}
+                  locations={locations.map((item) => ({
+                    ...item,
+                    is_leader: riders.some(
+                      (rider) => rider.id === item.member_id && rider.is_leader
+                    ),
+                  }))}
                   routeCoordinates={routeCoordinates}
                   destination={
                     room.destinationLat != null && room.destinationLng != null
@@ -932,6 +970,11 @@ const isLive =
                         <p className="truncate text-sm font-semibold text-charcoal">
                           {rider.rider_name}
                         </p>
+                        {rider.is_leader && (
+                          <span className="mt-0.5 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                            Leader
+                          </span>
+                        )}
                         <p className="text-xs text-charcoal-muted">
                           
 {!riderLocation
