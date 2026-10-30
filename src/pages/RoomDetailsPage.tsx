@@ -45,7 +45,19 @@ export default function RoomDetailsPage() {
   )?.riderName?.trim();
 
   const [membershipRiderName, setMembershipRiderName] = useState<string | null>(null);
+  const [activeMemberId, setActiveMemberId] = useState<string | null>(null);
   const activeRiderName = riderName || membershipRiderName;
+
+  useEffect(() => {
+    if (!roomId) return;
+    const stateMemberId = (location.state as { memberId?: string } | null)?.memberId;
+    const storedMemberId = sessionStorage.getItem(`ridesync-active-member-${roomId}`);
+    const memberId = stateMemberId || storedMemberId;
+    if (memberId) {
+      setActiveMemberId(memberId);
+      sessionStorage.setItem(`ridesync-active-member-${roomId}`, memberId);
+    }
+  }, [roomId, location.state]);
 
   const [myLocation, setMyLocation] = useState<{
     latitude: number;
@@ -98,18 +110,17 @@ useEffect(() => {
   };
 }, []);
 
-// Recover the signed-in rider identity from the database after refresh/direct link.
-// Router navigation state is only a convenience and is not persisted by the browser.
+// Restore this tab's selected rider membership after a refresh.
 useEffect(() => {
-  if (!roomId || !currentUserId || riderName) return;
+  if (!roomId || !activeMemberId) return;
 
   let cancelled = false;
   async function loadMyMembership() {
     const { data, error } = await supabase
       .from('ride_members')
-      .select('rider_name')
+      .select('id, rider_name')
       .eq('room_id', roomId)
-      .eq('user_id', currentUserId)
+      .eq('id', activeMemberId)
       .maybeSingle();
 
     if (cancelled) return;
@@ -117,14 +128,21 @@ useEffect(() => {
       console.error('Load current rider membership failed:', error.message);
       return;
     }
-    setMembershipRiderName(data?.rider_name ?? null);
+
+    if (data) {
+      setMembershipRiderName(data.rider_name);
+    } else {
+      setMembershipRiderName(null);
+      setActiveMemberId(null);
+      sessionStorage.removeItem(`ridesync-active-member-${roomId}`);
+    }
   }
 
   void loadMyMembership();
   return () => {
     cancelled = true;
   };
-}, [roomId, currentUserId, riderName]);
+}, [roomId, activeMemberId]);
 
 const isRideLeader = Boolean(
   room?.createdBy &&
@@ -259,9 +277,15 @@ useEffect(() => {
     };
   }, [roomId]);
 
-  // 3. Save this rider's GPS coordinates
+  // 3. Save GPS for the exact rider profile selected in this tab.
   useEffect(() => {
-    if (!room?.id || !activeRiderName || !myLocation || !currentUserId) return;
+    if (
+      !room?.id ||
+      !activeRiderName ||
+      !activeMemberId ||
+      !myLocation ||
+      !currentUserId
+    ) return;
 
     let cancelled = false;
 
@@ -271,13 +295,14 @@ useEffect(() => {
         .upsert(
           {
             room_id: room!.id,
+            member_id: activeMemberId,
             user_id: currentUserId,
             rider_name: activeRiderName!,
             latitude: myLocation!.latitude,
             longitude: myLocation!.longitude,
             updated_at: new Date().toISOString(),
           },
-          { onConflict: 'room_id,user_id' }
+          { onConflict: 'room_id,member_id' }
         );
 
       if (cancelled) return;
@@ -295,7 +320,7 @@ useEffect(() => {
     return () => {
       cancelled = true;
     };
-  }, [room?.id, activeRiderName, myLocation, currentUserId]);
+  }, [room?.id, activeRiderName, activeMemberId, myLocation, currentUserId]);
 
   // 4. Load riders
   
@@ -395,7 +420,7 @@ return () => {
   // 5. Get a road-following route from the first live rider to the selected destination.
   useEffect(() => {
     const start =
-      locations.find((item) => item.user_id === currentUserId) ??
+      locations.find((item) => item.member_id === activeMemberId) ??
       locations[0];
     const endLat = room?.destinationLat;
     const endLng = room?.destinationLng;
@@ -492,7 +517,7 @@ return () => {
 
     void loadRoute();
     return () => controller.abort();
-  }, [locations, currentUserId, room?.destinationLat, room?.destinationLng]);
+  }, [locations, activeMemberId, room?.destinationLat, room?.destinationLng]);
 
   // 6. Load latest GPS locations once, then receive live database changes.
   useEffect(() => {
@@ -507,7 +532,7 @@ return () => {
     async function loadLocations() {
       const { data, error } = await supabase
         .from('ride_locations')
-        .select('id, room_id, user_id, rider_name, latitude, longitude, updated_at')
+        .select('id, room_id, member_id, user_id, rider_name, latitude, longitude, updated_at')
         .eq('room_id', roomId);
 
       if (error) {
@@ -553,7 +578,7 @@ return () => {
             const existingIndex = current.findIndex(
               (location) =>
                 location.id === incoming.id ||
-                (!!incoming.user_id && location.user_id === incoming.user_id)
+                (!!incoming.member_id && location.member_id === incoming.member_id)
             );
 
             if (existingIndex === -1) return [...current, incoming];
@@ -883,7 +908,7 @@ return () => {
                   
 const riderLocation = locations.find(
   (item) =>
-    (!!rider.user_id && item.user_id === rider.user_id) ||
+    (!!item.member_id && item.member_id === rider.id) ||
     item.rider_name === rider.rider_name
 );
 
