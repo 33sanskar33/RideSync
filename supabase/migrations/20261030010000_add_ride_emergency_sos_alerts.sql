@@ -48,6 +48,7 @@ with check (
   )
 );
 
+drop policy if exists "Only ride creator can update SOS alerts" on public.ride_sos_alerts;
 drop policy if exists "Only ride leader can update SOS alerts" on public.ride_sos_alerts;
 create policy "Only ride leader can update SOS alerts"
 on public.ride_sos_alerts for update to authenticated
