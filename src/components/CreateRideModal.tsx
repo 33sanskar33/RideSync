@@ -15,6 +15,7 @@ interface CreateRideModalProps {
 
 interface FormErrors {
   name?: string;
+  leaderName?: string;
 }
 
 interface DestinationResult {
@@ -26,6 +27,8 @@ interface DestinationResult {
 export default function CreateRideModal({ open, onClose }: CreateRideModalProps) {
   const navigate = useNavigate();
   const [name, setName] = useState('');
+  const [leaderName, setLeaderName] = useState('');
+  const [leaderMembership, setLeaderMembership] = useState<{ id: string; name: string } | null>(null);
   const [destination, setDestination] = useState('');
   const [destinationResults, setDestinationResults] = useState<DestinationResult[]>([]);
   const [destinationLat, setDestinationLat] = useState<number | null>(null);
@@ -38,6 +41,8 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
 
   function handleClose() {
     setName('');
+    setLeaderName('');
+    setLeaderMembership(null);
     setDestination('');
     setDestinationResults([]);
     setDestinationLat(null);
@@ -58,8 +63,13 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
     } else if (name.trim().length > 60) {
       next.name = 'Ride name must be 60 characters or fewer.';
     }
+    if (!leaderName.trim()) {
+      next.leaderName = 'Your rider name is required.';
+    } else if (leaderName.trim().length > 60) {
+      next.leaderName = 'Your rider name must be 60 characters or fewer.';
+    }
     setErrors(next);
-    return !next.name;
+    return !next.name && !next.leaderName;
   }
 
   async function searchDestination() {
@@ -143,6 +153,30 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
 
       if (error) throw error;
 
+      const { data: leaderData, error: leaderError } = await supabase.rpc(
+        'register_ride_room_leader',
+        {
+          target_room_id: data.id,
+          leader_rider_name: leaderName.trim(),
+        }
+      );
+
+      if (leaderError) {
+        throw new Error(
+          `Ride room was created, but leader registration failed: ${leaderError.message}`
+        );
+      }
+
+      const registeredLeader = leaderData?.[0];
+      if (!registeredLeader?.member_id) {
+        throw new Error('Ride room was created, but the leader membership was not returned.');
+      }
+
+      setLeaderMembership({
+        id: registeredLeader.member_id,
+        name: registeredLeader.rider_name,
+      });
+
       setRoom({
         id: data.id,
         code: data.room_code,
@@ -170,10 +204,17 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
   }
 
   function handleGoToRoom() {
-    if (!room) return;
+    if (!room || !leaderMembership) return;
     const roomId = room.id;
+    sessionStorage.setItem(`ridesync-active-member-${roomId}`, leaderMembership.id);
     handleClose();
-    navigate(`/room/${roomId}`);
+    navigate(`/room/${roomId}`, {
+      state: {
+        riderName: leaderMembership.name,
+        memberId: leaderMembership.id,
+        isLeader: true,
+      },
+    });
   }
 
   if (room) {
@@ -193,6 +234,10 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
           </div>
 
           <div className="space-y-3 rounded-xl border border-gray-200 bg-white px-4 py-4">
+            <div>
+              <p className="text-xs font-medium text-charcoal-muted">Leader</p>
+              <p className="mt-0.5 text-sm font-semibold text-charcoal">{leaderMembership?.name ?? leaderName} <span className="text-amber-700">· Leader</span></p>
+            </div>
             <div>
               <p className="text-xs font-medium text-charcoal-muted">Ride name</p>
               <p className="mt-0.5 text-sm font-semibold text-charcoal">{room.name}</p>
@@ -256,6 +301,18 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
             </p>
           </div>
         </div>
+
+        <FormField
+          label="Your rider name (Leader)"
+          type="text"
+          placeholder="e.g. Sanskar"
+          value={leaderName}
+          onChange={(e) => setLeaderName(e.target.value)}
+          error={errors.leaderName}
+          autoComplete="name"
+          required
+          maxLength={60}
+        />
 
         <FormField
           label="Ride name"
