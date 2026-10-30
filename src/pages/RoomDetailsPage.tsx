@@ -19,6 +19,7 @@ import {
 import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
 import CopyCodeButton from '@/components/CopyCodeButton';
+import RideGroupChat from '@/components/RideGroupChat';
 
 interface RideRoom {
   id: string;
@@ -1335,6 +1336,14 @@ const isLive =
             )}
           </div>
         </div>
+
+        <RideGroupChat
+          roomId={room.id}
+          memberId={activeMemberId}
+          userId={currentUserId}
+          riderName={activeRiderName ?? null}
+          rideEnded={room.status === 'ended'}
+        />
 
         <div className="mt-6">
           <Link to="/dashboard">
