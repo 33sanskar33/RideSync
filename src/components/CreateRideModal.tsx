@@ -114,6 +114,16 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
         throw new Error('Please sign in before creating a ride.');
       }
 
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      console.log('RideSync auth diagnostic:', {
+        userExists: !!authData.user,
+        sessionExists: !!sessionData.session,
+        sameUser: authData.user?.id === sessionData.session?.user?.id,
+        sessionError: sessionError?.message ?? null,
+      });
+
       const segment = () =>
         Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, '0');
       const code = `RIDE-${segment()}`;
