@@ -13,6 +13,8 @@ import 'leaflet/dist/leaflet.css';
 
 export interface RiderLocation {
   id: string;
+  room_id?: string;
+  user_id?: string | null;
   rider_name: string;
   latitude: number;
   longitude: number;
