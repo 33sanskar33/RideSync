@@ -99,7 +99,15 @@ export default function RideGroupChat({
       }
 
       const ordered = ((data ?? []) as RideChatMessage[]).reverse();
-      setMessages(ordered);
+      setMessages((current) => {
+        const merged = new Map(current.map((message) => [message.id, message]));
+        ordered.forEach((message) => merged.set(message.id, message));
+        return [...merged.values()].sort(
+          (a, b) =>
+            new Date(a.created_at).getTime() -
+            new Date(b.created_at).getTime()
+        );
+      });
       setError(null);
     };
 
