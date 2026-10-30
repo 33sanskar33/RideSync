@@ -181,7 +181,7 @@ useEffect(() => {
 const isRideLeader = Boolean(
   room?.createdBy &&
   currentUserId &&
-  room.createdBy === currentUserId &&
+  room.createdBy === currentUserId
 );
 
 const updateRideStatus = async (status: 'active' | 'ended') => {
