@@ -215,7 +215,7 @@ const updateRideStatus = async (status: 'active' | 'paused' | 'ended') => {
       .from('ride_rooms')
       .update({ status })
       .eq('id', room.id)
-      .select('id')
+      .select('id, status, elapsed_seconds, started_at, active_since, paused_at, ended_at')
       .maybeSingle();
 
     if (error) throw error;
@@ -224,7 +224,21 @@ const updateRideStatus = async (status: 'active' | 'paused' | 'ended') => {
       throw new Error('Ride status was not updated. Check that you are the ride creator.');
     }
 
-    setRoom((current) => current ? { ...current, status } : current);
+    // Apply the database-generated timer timestamps immediately. In particular,
+    // waiting -> active must set activeSince now, without waiting for Realtime.
+    setRoom((current) =>
+      current
+        ? {
+            ...current,
+            status: data.status,
+            elapsedSeconds: data.elapsed_seconds ?? 0,
+            startedAt: data.started_at ?? null,
+            activeSince: data.active_since ?? null,
+            pausedAt: data.paused_at ?? null,
+            endedAt: data.ended_at ?? null,
+          }
+        : current
+    );
   } catch (error) {
     console.error('Update ride status failed:', error);
     const message =
