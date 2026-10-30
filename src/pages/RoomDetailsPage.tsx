@@ -239,7 +239,7 @@ const updateRideStatus = async (status: 'active' | 'paused' | 'ended') => {
 useEffect(() => {
   const interval = window.setInterval(() => {
     setNow(Date.now());
-  }, 5000);
+  }, 1000);
 
   return () => window.clearInterval(interval);
 }, []);
