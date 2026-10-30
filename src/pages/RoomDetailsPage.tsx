@@ -27,6 +27,11 @@ interface RideRoom {
   createdAt: number;
   status: 'waiting' | 'active' | 'paused' | 'ended';
   createdBy: string | null;
+  elapsedSeconds: number;
+  startedAt: string | null;
+  activeSince: string | null;
+  pausedAt: string | null;
+  endedAt: string | null;
 }
 
 interface Rider {
@@ -90,6 +95,13 @@ export default function RoomDetailsPage() {
   
   const [now, setNow] = useState(Date.now());
   const [updatingRideStatus, setUpdatingRideStatus] = useState(false);
+
+  const elapsedRideSeconds = room
+    ? room.elapsedSeconds +
+      (room.status === 'active' && room.activeSince
+        ? Math.max(0, Math.floor((now - new Date(room.activeSince).getTime()) / 1000))
+        : 0)
+    : 0;
 
   
 useEffect(() => {
@@ -282,7 +294,7 @@ useEffect(() => {
       try {
         const { data, error } = await supabase
           .from('ride_rooms')
-          .select('id, room_code, ride_name, destination, destination_lat, destination_lng, created_at, status, created_by')
+          .select('id, room_code, ride_name, destination, destination_lat, destination_lng, created_at, status, created_by, elapsed_seconds, started_at, active_since, paused_at, ended_at')
           .eq('id', roomId)
           .maybeSingle();
 
@@ -301,6 +313,11 @@ useEffect(() => {
                   createdAt: new Date(data.created_at).getTime(),
                   status: data.status ?? 'waiting',
                   createdBy: data.created_by ?? null,
+                  elapsedSeconds: data.elapsed_seconds ?? 0,
+                  startedAt: data.started_at ?? null,
+                  activeSince: data.active_since ?? null,
+                  pausedAt: data.paused_at ?? null,
+                  endedAt: data.ended_at ?? null,
                 }
               : null
           );
@@ -429,6 +446,11 @@ const channel = supabase
         destination_lng: number | null;
         created_at: string;
         status: 'waiting' | 'active' | 'paused' | 'ended';
+        elapsed_seconds: number;
+        started_at: string | null;
+        active_since: string | null;
+        paused_at: string | null;
+        ended_at: string | null;
       };
 
       setRoom((current) =>
@@ -442,6 +464,11 @@ const channel = supabase
               destinationLng: updatedRoom.destination_lng ?? null,
               createdAt: new Date(updatedRoom.created_at).getTime(),
               status: updatedRoom.status,
+              elapsedSeconds: updatedRoom.elapsed_seconds ?? 0,
+              startedAt: updatedRoom.started_at ?? null,
+              activeSince: updatedRoom.active_since ?? null,
+              pausedAt: updatedRoom.paused_at ?? null,
+              endedAt: updatedRoom.ended_at ?? null,
             }
           : current
       );
@@ -654,6 +681,16 @@ return () => {
     };
   }, [roomId]);
 
+  const formatElapsedTime = (totalSeconds: number) => {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const seconds = safeSeconds % 60;
+    return [hours, minutes, seconds]
+      .map((value) => String(value).padStart(2, '0'))
+      .join(':');
+  };
+
   const formatRouteDistance = (meters: number) =>
     distanceUnit === 'mi'
       ? `${(meters / 1609.344).toFixed(1)} mi`
@@ -746,6 +783,22 @@ return () => {
           ? 'Ride Ended'
           : 'Waiting to Start'}
   </span>
+
+  <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+    <p className="text-xs text-charcoal-muted">Total ride time</p>
+    <p className="mt-0.5 font-mono text-xl font-bold tabular-nums text-charcoal" aria-live="off">
+      {formatElapsedTime(elapsedRideSeconds)}
+    </p>
+    <p className="mt-0.5 text-[11px] text-charcoal-muted">
+      {room.status === 'waiting'
+        ? 'Starts when the leader starts the ride'
+        : room.status === 'active'
+          ? 'Timer running'
+          : room.status === 'paused'
+            ? 'Timer paused'
+            : 'Final ride duration'}
+    </p>
+  </div>
 
   {isRideLeader && room.status === 'waiting' && (
     <Button onClick={() => updateRideStatus('active')} loading={updatingRideStatus}>
