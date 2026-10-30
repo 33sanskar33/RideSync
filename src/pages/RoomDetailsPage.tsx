@@ -15,6 +15,7 @@ import {
   Siren,
   CheckCircle2,
   MapPinned,
+  Gauge,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
@@ -88,6 +89,7 @@ export default function RoomDetailsPage() {
     latitude: number;
     longitude: number;
   } | null>(null);
+  const [speedMetersPerSecond, setSpeedMetersPerSecond] = useState<number | null>(null);
 
   const [locationStatus, setLocationStatus] =
     useState('Location not started');
@@ -296,9 +298,15 @@ useEffect(() => {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         });
+        setSpeedMetersPerSecond(
+          typeof position.coords.speed === 'number' && Number.isFinite(position.coords.speed)
+            ? Math.max(0, position.coords.speed)
+            : null
+        );
         setLocationStatus('Location active');
       },
       (error) => {
+        setSpeedMetersPerSecond(null);
         setLocationStatus(
           error.code === 1
             ? 'Location permission denied'
@@ -830,6 +838,11 @@ return () => {
     };
   }, [roomId]);
 
+  const speedUnit = distanceUnit === 'mi' ? 'mph' : 'km/h';
+  const currentSpeed = speedMetersPerSecond === null
+    ? null
+    : speedMetersPerSecond * (distanceUnit === 'mi' ? 2.236936 : 3.6);
+
   const formatElapsedTime = (totalSeconds: number) => {
     const safeSeconds = Math.max(0, Math.floor(totalSeconds));
     const hours = Math.floor(safeSeconds / 3600);
@@ -1005,6 +1018,28 @@ return () => {
             </div>
           </div>
         </div>
+
+        {/* Live speedometer */}
+        <section className="mb-6 flex items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-card" aria-label="Live speedometer">
+          <div className="flex items-center gap-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-ridesync-50 text-ridesync-700">
+              <Gauge className="h-6 w-6" />
+            </span>
+            <div>
+              <p className="text-sm font-semibold text-charcoal">Live speed</p>
+              <p className="text-xs text-charcoal-muted">Based on your device GPS</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="font-mono text-3xl font-bold tabular-nums text-charcoal">
+              {currentSpeed === null ? '—' : currentSpeed.toFixed(1)}
+              <span className="ml-1 text-sm font-semibold text-charcoal-muted">{speedUnit}</span>
+            </p>
+            <p className="text-[11px] text-charcoal-muted">
+              {currentSpeed === null ? 'Waiting for GPS speed' : 'GPS speed available'}
+            </p>
+          </div>
+        </section>
 
         {/* GPS status */}
         <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
