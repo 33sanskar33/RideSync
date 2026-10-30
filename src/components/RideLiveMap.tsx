@@ -6,6 +6,7 @@ import {
   MapContainer,
   Popup,
   TileLayer,
+  Tooltip,
   useMap,
 } from 'react-leaflet';
 import type { CircleMarker as LeafletCircleMarker } from 'leaflet';
@@ -48,35 +49,164 @@ function getRiderColor(riderName: string) {
   return RIDER_COLORS[hash % RIDER_COLORS.length];
 }
 
+const RIDER_COLOCATION_RADIUS_METERS = 20;
+
+interface RiderGroup {
+  key: string;
+  riders: RiderLocation[];
+  latitude: number;
+  longitude: number;
+}
+
+function distanceBetweenMeters(
+  first: RiderLocation,
+  second: RiderLocation,
+): number {
+  const earthRadiusMeters = 6_371_000;
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const latitudeDelta = toRadians(second.latitude - first.latitude);
+  const longitudeDelta = toRadians(second.longitude - first.longitude);
+  const firstLatitude = toRadians(first.latitude);
+  const secondLatitude = toRadians(second.latitude);
+
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(firstLatitude) *
+      Math.cos(secondLatitude) *
+      Math.sin(longitudeDelta / 2) ** 2;
+
+  return 2 * earthRadiusMeters * Math.atan2(
+    Math.sqrt(haversine),
+    Math.sqrt(1 - haversine),
+  );
+}
+
+// Riders within 20 metres are represented by one count marker. Their stored
+// GPS coordinates stay untouched; the marker uses only the group's visual centre.
+function groupNearbyRiders(locations: RiderLocation[]): RiderGroup[] {
+  const parents = locations.map((_, index) => index);
+
+  const findRoot = (index: number): number => {
+    if (parents[index] !== index) {
+      parents[index] = findRoot(parents[index]);
+    }
+    return parents[index];
+  };
+
+  const join = (first: number, second: number) => {
+    const firstRoot = findRoot(first);
+    const secondRoot = findRoot(second);
+    if (firstRoot !== secondRoot) parents[secondRoot] = firstRoot;
+  };
+
+  for (let first = 0; first < locations.length; first += 1) {
+    for (let second = first + 1; second < locations.length; second += 1) {
+      if (
+        distanceBetweenMeters(locations[first], locations[second]) <=
+        RIDER_COLOCATION_RADIUS_METERS
+      ) {
+        join(first, second);
+      }
+    }
+  }
+
+  const groups = new Map<number, RiderLocation[]>();
+  locations.forEach((rider, index) => {
+    const root = findRoot(index);
+    const group = groups.get(root) ?? [];
+    group.push(rider);
+    groups.set(root, group);
+  });
+
+  return Array.from(groups.values()).map((riders) => ({
+    key: riders.map((rider) => rider.id).sort().join('-'),
+    riders,
+    latitude:
+      riders.reduce((total, rider) => total + rider.latitude, 0) /
+      riders.length,
+    longitude:
+      riders.reduce((total, rider) => total + rider.longitude, 0) /
+      riders.length,
+  }));
+}
+
+function RiderClusterMarker({ group }: { group: RiderGroup }) {
+  const radius = Math.min(22, 13 + Math.floor(group.riders.length / 2));
+
+  return (
+    <CircleMarker
+      center={[group.latitude, group.longitude]}
+      radius={radius}
+      pathOptions={{
+        color: '#ffffff',
+        weight: 3,
+        fillColor: '#1d4ed8',
+        fillOpacity: 0.95,
+      }}
+    >
+      <Tooltip permanent direction="top" offset={[0, -radius]}>
+        <span className="font-bold">
+          {group.riders.length} riders
+        </span>
+      </Tooltip>
+      <Popup>
+        <div className="min-w-40">
+          <strong>
+            {group.riders.length} riders in this spot
+          </strong>
+          <div className="mt-2 space-y-1">
+            {group.riders.map((rider) => (
+              <div key={rider.id} className="flex items-center justify-between gap-4 text-sm">
+                <span className="font-medium">{rider.rider_name}</span>
+                <span className="text-xs text-gray-500">
+                  {new Date(rider.updated_at).toLocaleTimeString()}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-gray-500">
+            Riders shown together are within approximately 20 metres.
+          </p>
+        </div>
+      </Popup>
+    </CircleMarker>
+  );
+}
+
 function FitMapToRiders({
   locations,
 }: {
   locations: RiderLocation[];
 }) {
   const map = useMap();
-  const hasFitted = useRef(false);
+  const previousRiderIds = useRef('');
 
   useEffect(() => {
-    if (locations.length === 0 || hasFitted.current) return;
+    if (locations.length === 0) return;
+
+    // Refit when a new rider first appears. GPS coordinate updates for the
+    // same riders must not keep snapping the map away from the user's view.
+    const riderIds = locations.map((rider) => rider.id).sort().join('|');
+    if (riderIds === previousRiderIds.current) return;
+    previousRiderIds.current = riderIds;
 
     if (locations.length === 1) {
       map.setView(
         [locations[0].latitude, locations[0].longitude],
         15
       );
-    } else {
-      const bounds = locations.map(
-        (rider) =>
-          [rider.latitude, rider.longitude] as [number, number]
-      );
-
-      map.fitBounds(bounds, {
-        padding: [40, 40],
-        maxZoom: 15,
-      });
+      return;
     }
 
-    hasFitted.current = true;
+    const bounds = locations.map(
+      (rider) =>
+        [rider.latitude, rider.longitude] as [number, number]
+    );
+
+    map.fitBounds(bounds, {
+      padding: [40, 40],
+      maxZoom: 15,
+    });
   }, [locations, map]);
 
   return null;
@@ -185,9 +315,13 @@ export default function RideLiveMap({
         </CircleMarker>
       )}
 
-      {locations.map((rider) => (
-        <RiderMarker key={rider.id} rider={rider} />
-      ))}
+      {groupNearbyRiders(locations).map((group) =>
+        group.riders.length === 1 ? (
+          <RiderMarker key={group.riders[0].id} rider={group.riders[0]} />
+        ) : (
+          <RiderClusterMarker key={group.key} group={group} />
+        )
+      )}
     </MapContainer>
   );
 }

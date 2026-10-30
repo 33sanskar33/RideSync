@@ -12,7 +12,6 @@ import {
   Navigation,
   ArrowLeft,
   Info,
-  Lock,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
@@ -45,6 +44,21 @@ export default function RoomDetailsPage() {
     location.state as { riderName?: string } | null
   )?.riderName?.trim();
 
+  const [membershipRiderName, setMembershipRiderName] = useState<string | null>(null);
+  const [activeMemberId, setActiveMemberId] = useState<string | null>(null);
+  const activeRiderName = riderName || membershipRiderName;
+
+  useEffect(() => {
+    if (!roomId) return;
+    const stateMemberId = (location.state as { memberId?: string } | null)?.memberId;
+    const storedMemberId = sessionStorage.getItem(`ridesync-active-member-${roomId}`);
+    const memberId = stateMemberId || storedMemberId;
+    if (memberId) {
+      setActiveMemberId(memberId);
+      sessionStorage.setItem(`ridesync-active-member-${roomId}`, memberId);
+    }
+  }, [roomId, location.state]);
+
   const [myLocation, setMyLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -66,6 +80,12 @@ export default function RoomDetailsPage() {
     distanceMeters: number;
     durationSeconds: number;
   } | null>(null);
+
+  const [routeSteps, setRouteSteps] = useState<Array<{
+    instruction: string;
+    distanceMeters: number;
+    durationSeconds: number;
+  }>>([]);
   
   const [now, setNow] = useState(Date.now());
 
@@ -90,11 +110,45 @@ useEffect(() => {
   };
 }, []);
 
+// Restore this tab's selected rider membership after a refresh.
+useEffect(() => {
+  if (!roomId || !activeMemberId) return;
+
+  let cancelled = false;
+  async function loadMyMembership() {
+    const { data, error } = await supabase
+      .from('ride_members')
+      .select('id, rider_name')
+      .eq('room_id', roomId)
+      .eq('id', activeMemberId)
+      .maybeSingle();
+
+    if (cancelled) return;
+    if (error) {
+      console.error('Load current rider membership failed:', error.message);
+      return;
+    }
+
+    if (data) {
+      setMembershipRiderName(data.rider_name);
+    } else {
+      setMembershipRiderName(null);
+      setActiveMemberId(null);
+      sessionStorage.removeItem(`ridesync-active-member-${roomId}`);
+    }
+  }
+
+  void loadMyMembership();
+  return () => {
+    cancelled = true;
+  };
+}, [roomId, activeMemberId]);
+
 const isRideLeader = Boolean(
   room?.createdBy &&
   currentUserId &&
   room.createdBy === currentUserId &&
-  !riderName
+  !activeRiderName
 );
 
 const updateRideStatus = async (status: 'active' | 'ended') => {
@@ -223,9 +277,15 @@ useEffect(() => {
     };
   }, [roomId]);
 
-  // 3. Save this rider's GPS coordinates
+  // 3. Save GPS for the exact rider profile selected in this tab.
   useEffect(() => {
-    if (!room?.id || !riderName || !myLocation || !currentUserId) return;
+    if (
+      !room?.id ||
+      !activeRiderName ||
+      !activeMemberId ||
+      !myLocation ||
+      !currentUserId
+    ) return;
 
     let cancelled = false;
 
@@ -235,13 +295,14 @@ useEffect(() => {
         .upsert(
           {
             room_id: room!.id,
+            member_id: activeMemberId,
             user_id: currentUserId,
-            rider_name: riderName!,
+            rider_name: activeRiderName!,
             latitude: myLocation!.latitude,
             longitude: myLocation!.longitude,
             updated_at: new Date().toISOString(),
           },
-          { onConflict: 'room_id,user_id' }
+          { onConflict: 'room_id,member_id' }
         );
 
       if (cancelled) return;
@@ -259,7 +320,7 @@ useEffect(() => {
     return () => {
       cancelled = true;
     };
-  }, [room?.id, riderName, myLocation, currentUserId]);
+  }, [room?.id, activeRiderName, activeMemberId, myLocation, currentUserId]);
 
   // 4. Load riders
   
@@ -358,13 +419,16 @@ return () => {
 
   // 5. Get a road-following route from the first live rider to the selected destination.
   useEffect(() => {
-    const start = locations[0];
+    const start =
+      locations.find((item) => item.member_id === activeMemberId) ??
+      locations[0];
     const endLat = room?.destinationLat;
     const endLng = room?.destinationLng;
 
     if (!start || endLat == null || endLng == null) {
       setRouteCoordinates([]);
       setRouteSummary(null);
+      setRouteSteps([]);
       setRouteStatus(
         endLat == null || endLng == null
           ? 'Select a destination when creating the ride to show a route.'
@@ -377,7 +441,7 @@ return () => {
     async function loadRoute() {
       setRouteStatus('Calculating road route…');
       try {
-        const url = `https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${endLng},${endLat}?overview=full&geometries=geojson`;
+        const url = `https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${endLng},${endLat}?overview=full&geometries=geojson&steps=true`;
         const response = await fetch(url, { signal: controller.signal });
         if (!response.ok) throw new Error('Route service unavailable');
         const result = await response.json();
@@ -385,6 +449,18 @@ return () => {
           geometry?: { coordinates?: [number, number][] };
           distance?: number;
           duration?: number;
+          legs?: Array<{
+            steps?: Array<{
+              name?: string;
+              distance?: number;
+              duration?: number;
+              maneuver?: {
+                type?: string;
+                modifier?: string;
+                exit?: number;
+              };
+            }>;
+          }>;
         } | undefined;
         const coordinates = route?.geometry?.coordinates;
         if (!coordinates || coordinates.length < 2) {
@@ -396,19 +472,52 @@ return () => {
             ? { distanceMeters: route.distance, durationSeconds: route.duration }
             : null,
         );
-        setRouteStatus('Road route shown from the first live rider to the destination.');
+
+        const steps = (route.legs ?? []).flatMap((leg) => leg.steps ?? []);
+        setRouteSteps(
+          steps.map((step) => {
+            const type = step.maneuver?.type ?? 'continue';
+            const modifier = step.maneuver?.modifier;
+            const street = step.name ? ` onto ${step.name}` : '';
+            let instruction = 'Continue';
+            if (type === 'depart') instruction = 'Start riding';
+            else if (type === 'arrive') instruction = 'You have arrived';
+            else if (type === 'turn' && modifier) instruction = `Turn ${modifier}`;
+            else if (type === 'new name') instruction = 'Continue';
+            else if (type === 'merge' && modifier) instruction = `Merge ${modifier}`;
+            else if (type === 'on ramp') instruction = 'Take the ramp';
+            else if (type === 'off ramp') instruction = 'Take the exit';
+            else if (type === 'fork' && modifier) instruction = `Keep ${modifier}`;
+            else if (type === 'roundabout' || type === 'rotary') {
+              instruction = step.maneuver?.exit
+                ? `At the roundabout, take exit ${step.maneuver.exit}`
+                : 'Enter the roundabout';
+            } else if (type === 'end of road' && modifier) {
+              instruction = `At the end of the road, turn ${modifier}`;
+            } else if (type === 'uturn') instruction = 'Make a U-turn';
+            else if (type === 'continue' && modifier) instruction = `Continue ${modifier}`;
+
+            return {
+              instruction: `${instruction}${street}`,
+              distanceMeters: step.distance ?? 0,
+              durationSeconds: step.duration ?? 0,
+            };
+          })
+        );
+        setRouteStatus('Road route and turn-by-turn directions are ready.');
       } catch (error) {
         if (controller.signal.aborted) return;
         console.error('Load road route failed:', error);
         setRouteCoordinates([]);
         setRouteSummary(null);
+        setRouteSteps([]);
         setRouteStatus('Could not calculate the road route. Please try again later.');
       }
     }
 
     void loadRoute();
     return () => controller.abort();
-  }, [locations, room?.destinationLat, room?.destinationLng]);
+  }, [locations, activeMemberId, room?.destinationLat, room?.destinationLng]);
 
   // 6. Load latest GPS locations once, then receive live database changes.
   useEffect(() => {
@@ -423,7 +532,7 @@ return () => {
     async function loadLocations() {
       const { data, error } = await supabase
         .from('ride_locations')
-        .select('id, room_id, user_id, rider_name, latitude, longitude, updated_at')
+        .select('id, room_id, member_id, user_id, rider_name, latitude, longitude, updated_at')
         .eq('room_id', roomId);
 
       if (error) {
@@ -469,7 +578,7 @@ return () => {
             const existingIndex = current.findIndex(
               (location) =>
                 location.id === incoming.id ||
-                (!!incoming.user_id && location.user_id === incoming.user_id)
+                (!!incoming.member_id && location.member_id === incoming.member_id)
             );
 
             if (existingIndex === -1) return [...current, incoming];
@@ -640,7 +749,7 @@ return () => {
             </p>
           )}
 
-          {!riderName && (
+          {!activeRiderName && (
             <p className="mt-2 text-xs text-blue-800">
               Join this ride through the Join Ride form to share your
               location under your rider name.
@@ -739,17 +848,40 @@ return () => {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-4">
-                <Navigation className="h-5 w-5 text-gray-400" />
-                <div>
-                  <p className="text-sm font-semibold text-charcoal">
-                    Navigation
-                  </p>
-                  <p className="text-xs text-charcoal-muted">
-                    Coming soon
-                  </p>
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <Navigation className="h-5 w-5 text-ridesync-700" />
+                  <div>
+                    <p className="text-sm font-semibold text-charcoal">Turn-by-turn directions</p>
+                    <p className="text-xs text-charcoal-muted">
+                      {routeSteps.length > 0
+                        ? `${routeSteps.length} route steps · from your live location when available`
+                        : 'Directions appear after a rider location and destination are available.'}
+                    </p>
+                  </div>
                 </div>
-                <Lock className="ml-auto h-4 w-4 text-gray-400" />
+                {routeSteps.length > 0 ? (
+                  <ol className="max-h-72 space-y-3 overflow-y-auto pr-1">
+                    {routeSteps.map((step, index) => (
+                      <li key={`${index}-${step.instruction}`} className="flex gap-3">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ridesync-50 text-xs font-bold text-ridesync-700">
+                          {index + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-charcoal">{step.instruction}</p>
+                          <p className="text-xs text-charcoal-muted">
+                            {formatRouteDistance(step.distanceMeters)} · {formatRouteDuration(step.durationSeconds)}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p className="text-xs text-charcoal-muted">{routeStatus || 'Waiting for route…'}</p>
+                )}
+                <p className="mt-3 border-t border-gray-100 pt-3 text-xs text-amber-700">
+                  Follow road signs and ride safely. Directions are estimates, not live traffic guidance.
+                </p>
               </div>
             </div>
           </div>
@@ -776,7 +908,7 @@ return () => {
                   
 const riderLocation = locations.find(
   (item) =>
-    (!!rider.user_id && item.user_id === rider.user_id) ||
+    (!!item.member_id && item.member_id === rider.id) ||
     item.rider_name === rider.rider_name
 );
 
