@@ -54,29 +54,34 @@ function FitMapToRiders({
   locations: RiderLocation[];
 }) {
   const map = useMap();
-  const hasFitted = useRef(false);
+  const previousRiderIds = useRef('');
 
   useEffect(() => {
-    if (locations.length === 0 || hasFitted.current) return;
+    if (locations.length === 0) return;
+
+    // Refit when a new rider first appears. GPS coordinate updates for the
+    // same riders must not keep snapping the map away from the user's view.
+    const riderIds = locations.map((rider) => rider.id).sort().join('|');
+    if (riderIds === previousRiderIds.current) return;
+    previousRiderIds.current = riderIds;
 
     if (locations.length === 1) {
       map.setView(
         [locations[0].latitude, locations[0].longitude],
         15
       );
-    } else {
-      const bounds = locations.map(
-        (rider) =>
-          [rider.latitude, rider.longitude] as [number, number]
-      );
-
-      map.fitBounds(bounds, {
-        padding: [40, 40],
-        maxZoom: 15,
-      });
+      return;
     }
 
-    hasFitted.current = true;
+    const bounds = locations.map(
+      (rider) =>
+        [rider.latitude, rider.longitude] as [number, number]
+    );
+
+    map.fitBounds(bounds, {
+      padding: [40, 40],
+      maxZoom: 15,
+    });
   }, [locations, map]);
 
   return null;
