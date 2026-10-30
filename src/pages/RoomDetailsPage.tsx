@@ -34,6 +34,7 @@ interface Rider {
   id: string;
   rider_name: string;
   joined_at: string;
+  user_id?: string | null;
 }
 
 export default function RoomDetailsPage() {
@@ -57,6 +58,7 @@ export default function RoomDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [riders, setRiders] = useState<Rider[]>([]);
   const [locations, setLocations] = useState<RiderLocation[]>([]);
+  const [locationRealtimeStatus, setLocationRealtimeStatus] = useState('Connecting to live updates…');
   const [routeCoordinates, setRouteCoordinates] = useState<[number, number][]>([]);
   const [routeStatus, setRouteStatus] = useState('');
   const [distanceUnit, setDistanceUnit] = useState<'km' | 'mi'>('km');
@@ -273,7 +275,7 @@ useEffect(() => {
     async function loadRiders() {
       const { data, error } = await supabase
         .from('ride_members')
-        .select('id, rider_name, joined_at')
+        .select('id, rider_name, joined_at, user_id')
         .eq('room_id', roomId)
         .order('joined_at', { ascending: true });
 
@@ -408,10 +410,11 @@ return () => {
     return () => controller.abort();
   }, [locations, room?.destinationLat, room?.destinationLng]);
 
-  // 6. Fetch every rider's latest GPS location
-    useEffect(() => {
+  // 6. Load latest GPS locations once, then receive live database changes.
+  useEffect(() => {
     if (!roomId) {
       setLocations([]);
+      setLocationRealtimeStatus('Not connected');
       return;
     }
 
@@ -420,26 +423,82 @@ return () => {
     async function loadLocations() {
       const { data, error } = await supabase
         .from('ride_locations')
-        .select('id, rider_name, latitude, longitude, updated_at')
+        .select('id, room_id, user_id, rider_name, latitude, longitude, updated_at')
         .eq('room_id', roomId);
 
       if (error) {
         console.error('Load locations failed:', error.message);
+        if (!cancelled) setLocationRealtimeStatus('Could not load rider locations');
         return;
       }
 
       if (!cancelled) setLocations(data ?? []);
     }
 
+    // Load the current snapshot. Reload once the Realtime subscription is ready
+    // as well, so an update between the first query and subscription is not missed.
     void loadLocations();
 
-    const intervalId = window.setInterval(() => {
-      void loadLocations();
-    }, 3000);
+    const locationChannel = supabase
+      .channel(`ride-locations-${roomId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ride_locations',
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          if (cancelled) return;
+
+          if (payload.eventType === 'DELETE') {
+            const oldLocation = payload.old as { id?: string };
+            if (oldLocation.id) {
+              setLocations((current) =>
+                current.filter((location) => location.id !== oldLocation.id)
+              );
+            }
+            return;
+          }
+
+          const incoming = payload.new as RiderLocation & { room_id: string };
+          if (!incoming.id || incoming.room_id !== roomId) return;
+
+          setLocations((current) => {
+            const existingIndex = current.findIndex(
+              (location) =>
+                location.id === incoming.id ||
+                (!!incoming.user_id && location.user_id === incoming.user_id)
+            );
+
+            if (existingIndex === -1) return [...current, incoming];
+
+            const next = [...current];
+            next[existingIndex] = incoming;
+            return next;
+          });
+        }
+      )
+      .subscribe((status) => {
+        if (cancelled) return;
+
+        if (status === 'SUBSCRIBED') {
+          setLocationRealtimeStatus('Live updates connected');
+          void loadLocations();
+        } else if (
+          status === 'CHANNEL_ERROR' ||
+          status === 'TIMED_OUT' ||
+          status === 'CLOSED'
+        ) {
+          setLocationRealtimeStatus('Live updates disconnected');
+          console.warn('Ride locations realtime status:', status);
+        }
+      });
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      void supabase.removeChannel(locationChannel);
     };
   }, [roomId]);
 
@@ -464,16 +523,6 @@ return () => {
       </DashboardLayout>
     );
   }
-
-    if (loading) {
-      return (
-        <DashboardLayout>
-          <div className="py-12 text-center text-charcoal-muted">
-            Loading ride details...
-          </div>
-        </DashboardLayout>
-      );
-    }
 
   if (!room) {
     return (
@@ -615,10 +664,25 @@ return () => {
                 <h2 className="font-semibold text-charcoal">
                   Live rider map
                 </h2>
-                <span className="text-xs text-charcoal-muted">
-                  {locations.length} location
-                  {locations.length === 1 ? '' : 's'}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-charcoal-muted">
+                    <span
+                      className={`h-2 w-2 rounded-full ${
+                        locationRealtimeStatus === 'Live updates connected'
+                          ? 'bg-green-500'
+                          : locationRealtimeStatus === 'Live updates disconnected' ||
+                              locationRealtimeStatus === 'Could not load rider locations'
+                            ? 'bg-red-500'
+                            : 'bg-amber-500'
+                      }`}
+                    />
+                    {locationRealtimeStatus}
+                  </span>
+                  <span className="text-xs text-charcoal-muted">
+                    {locations.length} location
+                    {locations.length === 1 ? '' : 's'}
+                  </span>
+                </div>
               </div>
 
               <div className="h-[380px] w-full">
@@ -711,7 +775,9 @@ return () => {
                 {riders.map((rider) => {
                   
 const riderLocation = locations.find(
-  (item) => item.rider_name === rider.rider_name
+  (item) =>
+    (!!rider.user_id && item.user_id === rider.user_id) ||
+    item.rider_name === rider.rider_name
 );
 
 const isLive =
