@@ -13,6 +13,12 @@ create table if not exists public.ride_messages (
 create index if not exists ride_messages_room_created_idx
   on public.ride_messages (room_id, created_at desc);
 
+create index if not exists ride_messages_member_id_idx
+  on public.ride_messages (member_id);
+
+create index if not exists ride_messages_user_id_idx
+  on public.ride_messages (user_id);
+
 alter table public.ride_messages enable row level security;
 
 -- Supabase projects may apply permissive default table grants to new public tables.
