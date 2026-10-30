@@ -26,6 +26,7 @@ interface RideGroupChatProps {
   memberId: string | null;
   userId: string | null;
   riderName: string | null;
+  currentLocation: { latitude: number; longitude: number } | null;
   rideEnded: boolean;
 }
 
@@ -64,6 +65,7 @@ export default function RideGroupChat({
   memberId,
   userId,
   riderName,
+  currentLocation,
   rideEnded,
 }: RideGroupChatProps) {
   const [messages, setMessages] = useState<RideChatMessage[]>([]);
@@ -351,6 +353,20 @@ export default function RideGroupChat({
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => {
+              if (!currentLocation) return;
+              const mapsLink = `https://www.google.com/maps?q=${currentLocation.latitude},${currentLocation.longitude}`;
+              void sendMessage(`📍 My current location: ${mapsLink}`, 'quick');
+            }}
+            disabled={!canSend || sending || !currentLocation}
+            title={currentLocation ? 'Share your current GPS position with the group' : 'Waiting for a current GPS fix'}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-800 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <MapPin className="h-3.5 w-3.5" />
+            Share my location
+          </button>
         </div>
 
         {rideEnded ? (
