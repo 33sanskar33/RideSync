@@ -15,7 +15,6 @@ import {
   Siren,
   CheckCircle2,
   MapPinned,
-  Gauge,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
