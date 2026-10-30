@@ -44,6 +44,7 @@ with check (
     where m.id = ride_sos_alerts.member_id
       and m.room_id = ride_sos_alerts.room_id
       and m.user_id = (select auth.uid())
+      and m.rider_name = ride_sos_alerts.rider_name
       and r.status in ('active', 'paused')
   )
 );
@@ -73,6 +74,17 @@ as $$
 declare
   transition_time timestamptz := clock_timestamp();
 begin
+  if tg_op = 'INSERT' then
+    if new.status is distinct from 'pending'
+      or new.acknowledged_by is not null
+      or new.acknowledged_at is not null
+      or new.resolved_by is not null
+      or new.resolved_at is not null then
+      raise check_violation using message = 'New SOS alerts must start pending without acknowledgement or resolution metadata.';
+    end if;
+    return new;
+  end if;
+
   if new.id is distinct from old.id
     or new.room_id is distinct from old.room_id
     or new.member_id is distinct from old.member_id
@@ -112,7 +124,7 @@ $$;
 revoke all on function public.enforce_ride_sos_alert_update() from public, anon, authenticated;
 drop trigger if exists enforce_ride_sos_alert_update on public.ride_sos_alerts;
 create trigger enforce_ride_sos_alert_update
-before update on public.ride_sos_alerts
+before insert or update on public.ride_sos_alerts
 for each row execute function public.enforce_ride_sos_alert_update();
 
 do $$
