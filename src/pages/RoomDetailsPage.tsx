@@ -1342,6 +1342,7 @@ const isLive =
           memberId={activeMemberId}
           userId={currentUserId}
           riderName={activeRiderName ?? null}
+          currentLocation={myLocation}
           rideEnded={room.status === 'ended'}
         />
 
