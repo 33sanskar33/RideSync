@@ -25,7 +25,7 @@ interface RideRoom {
   destinationLat: number | null;
   destinationLng: number | null;
   createdAt: number;
-  status: 'waiting' | 'active' | 'ended';
+  status: 'waiting' | 'active' | 'paused' | 'ended';
   createdBy: string | null;
 }
 
@@ -89,6 +89,7 @@ export default function RoomDetailsPage() {
   }>>([]);
   
   const [now, setNow] = useState(Date.now());
+  const [updatingRideStatus, setUpdatingRideStatus] = useState(false);
 
   
 useEffect(() => {
@@ -184,12 +185,19 @@ const isRideLeader = Boolean(
   room.createdBy === currentUserId
 );
 
-const updateRideStatus = async (status: 'active' | 'ended') => {
-  if (!room || !isRideLeader) {
-    alert('Only the person who created this ride can start or end it.');
+const updateRideStatus = async (status: 'active' | 'paused' | 'ended') => {
+  if (!room || !isRideLeader || updatingRideStatus) {
+    if (!isRideLeader) {
+      alert('Only the person who created this ride can control its status.');
+    }
     return;
   }
 
+  if (status === 'ended' && !window.confirm('End this ride for everyone? This cannot be undone.')) {
+    return;
+  }
+
+  setUpdatingRideStatus(true);
   try {
     const { data, error } = await supabase
       .from('ride_rooms')
@@ -201,15 +209,17 @@ const updateRideStatus = async (status: 'active' | 'ended') => {
     if (error) throw error;
 
     if (!data) {
-      throw new Error('Room status update failed');
+      throw new Error('Ride status was not updated. Check that you are the ride creator.');
     }
 
-    setRoom((current) =>
-      current ? { ...current, status } : current
-    );
+    setRoom((current) => current ? { ...current, status } : current);
   } catch (error) {
     console.error('Update ride status failed:', error);
-    alert('Could not update ride status. Please try again.');
+    const message =
+      error instanceof Error ? error.message : 'Could not update ride status. Please try again.';
+    alert(message);
+  } finally {
+    setUpdatingRideStatus(false);
   }
 };
 
@@ -418,7 +428,7 @@ const channel = supabase
         destination_lat: number | null;
         destination_lng: number | null;
         created_at: string;
-        status: 'waiting' | 'active' | 'ended';
+        status: 'waiting' | 'active' | 'paused' | 'ended';
       };
 
       setRoom((current) =>
@@ -721,31 +731,59 @@ return () => {
     className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-semibold ${
       room.status === 'active'
         ? 'bg-green-100 text-green-700'
-        : room.status === 'ended'
-          ? 'bg-gray-200 text-gray-700'
-          : 'bg-amber-100 text-amber-700'
+        : room.status === 'paused'
+          ? 'bg-orange-100 text-orange-700'
+          : room.status === 'ended'
+            ? 'bg-gray-200 text-gray-700'
+            : 'bg-amber-100 text-amber-700'
     }`}
   >
     {room.status === 'active'
       ? 'Ride Active'
-      : room.status === 'ended'
-        ? 'Ride Ended'
-        : 'Waiting to Start'}
+      : room.status === 'paused'
+        ? 'Ride Paused'
+        : room.status === 'ended'
+          ? 'Ride Ended'
+          : 'Waiting to Start'}
   </span>
 
   {isRideLeader && room.status === 'waiting' && (
-    <Button onClick={() => updateRideStatus('active')}>
+    <Button onClick={() => updateRideStatus('active')} loading={updatingRideStatus}>
       Start Ride
     </Button>
   )}
 
   {isRideLeader && room.status === 'active' && (
-    <Button
-      variant="secondary"
-      onClick={() => updateRideStatus('ended')}
-    >
-      End Ride
-    </Button>
+    <div className="flex flex-wrap gap-2">
+      <Button
+        variant="secondary"
+        onClick={() => updateRideStatus('paused')}
+        loading={updatingRideStatus}
+      >
+        Pause Ride
+      </Button>
+      <Button
+        onClick={() => updateRideStatus('ended')}
+        disabled={updatingRideStatus}
+      >
+        End Ride
+      </Button>
+    </div>
+  )}
+
+  {isRideLeader && room.status === 'paused' && (
+    <div className="flex flex-wrap gap-2">
+      <Button onClick={() => updateRideStatus('active')} loading={updatingRideStatus}>
+        Resume Ride
+      </Button>
+      <Button
+        variant="secondary"
+        onClick={() => updateRideStatus('ended')}
+        disabled={updatingRideStatus}
+      >
+        End Ride
+      </Button>
+    </div>
   )}
 
   {!isRideLeader && room.status !== 'ended' && (
