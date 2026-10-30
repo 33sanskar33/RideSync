@@ -20,6 +20,7 @@ export interface RiderLocation {
   latitude: number;
   longitude: number;
   updated_at: string;
+  is_leader?: boolean;
 }
 
 interface RideLiveMapProps {
@@ -157,7 +158,10 @@ function RiderClusterMarker({ group }: { group: RiderGroup }) {
           <div className="mt-2 space-y-1">
             {group.riders.map((rider) => (
               <div key={rider.id} className="flex items-center justify-between gap-4 text-sm">
-                <span className="font-medium">{rider.rider_name}</span>
+                <span className="font-medium">
+                  {rider.rider_name}
+                  {rider.is_leader && <strong className="ml-2 text-amber-700">Leader</strong>}
+                </span>
                 <span className="text-xs text-gray-500">
                   {new Date(rider.updated_at).toLocaleTimeString()}
                 </span>
@@ -215,8 +219,8 @@ function FitMapToRiders({
 function RiderMarker({ rider }: { rider: RiderLocation }) {
   const markerRef = useRef<LeafletCircleMarker | null>(null);
   const color = useMemo(
-    () => getRiderColor(rider.rider_name),
-    [rider.rider_name]
+    () => rider.is_leader ? '#d97706' : getRiderColor(rider.rider_name),
+    [rider.rider_name, rider.is_leader]
   );
 
   useEffect(() => {
@@ -267,8 +271,14 @@ function RiderMarker({ rider }: { rider: RiderLocation }) {
         fillOpacity: 1,
       }}
     >
+      {rider.is_leader && (
+        <Tooltip permanent direction="top" offset={[0, -10]}>
+          <span className="font-bold text-amber-700">Leader</span>
+        </Tooltip>
+      )}
       <Popup>
         <strong>{rider.rider_name}</strong>
+        {rider.is_leader && <span className="ml-2 font-bold text-amber-700">Leader</span>}
         <br />
         Last location update:{' '}
         {new Date(rider.updated_at).toLocaleTimeString()}
