@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import RideLiveMap, {
@@ -90,6 +90,8 @@ export default function RoomDetailsPage() {
     longitude: number;
   } | null>(null);
   const [speedMetersPerSecond, setSpeedMetersPerSecond] = useState<number | null>(null);
+  const [speedometerOffset, setSpeedometerOffset] = useState({ x: 0, y: 0 });
+  const speedometerDrag = useRef<{ pointerX: number; pointerY: number; offsetX: number; offsetY: number } | null>(null);
 
   const [locationStatus, setLocationStatus] =
     useState('Location not started');
@@ -1019,28 +1021,6 @@ return () => {
           </div>
         </div>
 
-        {/* Live speedometer */}
-        <section className="mb-6 flex items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-card" aria-label="Live speedometer">
-          <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-ridesync-50 text-ridesync-700">
-              <Gauge className="h-6 w-6" />
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-charcoal">Live speed</p>
-              <p className="text-xs text-charcoal-muted">Based on your device GPS</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="font-mono text-3xl font-bold tabular-nums text-charcoal">
-              {currentSpeed === null ? '—' : currentSpeed.toFixed(1)}
-              <span className="ml-1 text-sm font-semibold text-charcoal-muted">{speedUnit}</span>
-            </p>
-            <p className="text-[11px] text-charcoal-muted">
-              {currentSpeed === null ? 'Waiting for GPS speed' : 'GPS speed available'}
-            </p>
-          </div>
-        </section>
-
         {/* GPS status */}
         <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
           <div className="flex items-center gap-2">
@@ -1187,7 +1167,7 @@ return () => {
                 </div>
               </div>
 
-              <div className="h-[380px] w-full">
+              <div className="relative h-[380px] w-full">
                 <RideLiveMap
                   locations={locations.map((item) => ({
                     ...item,
@@ -1202,6 +1182,43 @@ return () => {
                       : null
                   }
                 />
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Drag live speedometer to move it on the map"
+                  title="Drag to move speedometer"
+                  onPointerDown={(event) => {
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    speedometerDrag.current = {
+                      pointerX: event.clientX,
+                      pointerY: event.clientY,
+                      offsetX: speedometerOffset.x,
+                      offsetY: speedometerOffset.y,
+                    };
+                  }}
+                  onPointerMove={(event) => {
+                    const drag = speedometerDrag.current;
+                    if (!drag) return;
+                    const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+                    if (!bounds) return;
+                    const size = 68;
+                    const x = drag.offsetX + event.clientX - drag.pointerX;
+                    const y = drag.offsetY + event.clientY - drag.pointerY;
+                    setSpeedometerOffset({
+                      x: Math.max(0, Math.min(bounds.width - size - 16, x)),
+                      y: Math.max(0, Math.min(bounds.height - size - 16, y)),
+                    });
+                  }}
+                  onPointerUp={() => { speedometerDrag.current = null; }}
+                  onPointerCancel={() => { speedometerDrag.current = null; }}
+                  className="absolute left-4 top-4 z-[1000] flex h-[68px] w-[68px] cursor-grab touch-none select-none flex-col items-center justify-center rounded-full border-[3px] border-white bg-charcoal/90 text-white shadow-xl active:cursor-grabbing"
+                  style={{ transform: `translate(${speedometerOffset.x}px, ${speedometerOffset.y}px)` }}
+                >
+                  <span className="font-mono text-xl font-bold leading-none tabular-nums">
+                    {currentSpeed === null ? '—' : Math.round(currentSpeed)}
+                  </span>
+                  <span className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-white/80">{speedUnit}</span>
+                </div>
               </div>
 
               {routeStatus && (
