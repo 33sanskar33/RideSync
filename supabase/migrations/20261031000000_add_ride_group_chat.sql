@@ -15,6 +15,10 @@ create index if not exists ride_messages_room_created_idx
 
 alter table public.ride_messages enable row level security;
 
+-- Supabase projects may apply permissive default table grants to new public tables.
+-- Start from no API-role privileges, then grant only the operations chat needs.
+revoke all privileges on table public.ride_messages from public, anon, authenticated;
+
 grant select on public.ride_messages to authenticated;
 grant insert (room_id, member_id, user_id, rider_name, body, message_type)
   on public.ride_messages to authenticated;
