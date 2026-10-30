@@ -74,10 +74,31 @@ async function handleSubmit(e: FormEvent) {
       return;
     }
 
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError) throw authError;
+    if (!authData.user) throw new Error('Please sign in again before joining.');
+
+    const { data: membership, error: membershipError } = await supabase
+      .from('ride_members')
+      .select('id, rider_name')
+      .eq('room_id', joinedRoom.joined_room_id)
+      .eq('user_id', authData.user.id)
+      .eq('rider_name', name)
+      .single();
+
+    if (membershipError) throw membershipError;
+
+    // sessionStorage is isolated per tab, so two rider profiles can be tested
+    // with the same account in separate tabs without overwriting each other's identity.
+    sessionStorage.setItem(
+      `ridesync-active-member-${joinedRoom.joined_room_id}`,
+      membership.id
+    );
+
     handleClose();
     navigate(`/room/${joinedRoom.joined_room_id}`, {
-  state: { riderName: name },
-});
+      state: { riderName: membership.rider_name, memberId: membership.id },
+    });
   } catch (err) {
     console.error('Join ride failed:', err);
     setError('Could not join the ride. Please try again.');
