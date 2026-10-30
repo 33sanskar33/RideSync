@@ -12,6 +12,9 @@ import {
   Navigation,
   ArrowLeft,
   Info,
+  Siren,
+  CheckCircle2,
+  MapPinned,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
@@ -40,6 +43,21 @@ interface Rider {
   joined_at: string;
   user_id?: string | null;
   is_leader?: boolean;
+}
+
+interface RideSosAlert {
+  id: string;
+  room_id: string;
+  member_id: string;
+  user_id: string;
+  rider_name: string;
+  latitude: number;
+  longitude: number;
+  message: string;
+  status: 'pending' | 'acknowledged' | 'resolved';
+  created_at: string;
+  acknowledged_at: string | null;
+  resolved_at: string | null;
 }
 
 export default function RoomDetailsPage() {
@@ -95,6 +113,10 @@ export default function RoomDetailsPage() {
   
   const [now, setNow] = useState(Date.now());
   const [updatingRideStatus, setUpdatingRideStatus] = useState(false);
+  const [sosAlerts, setSosAlerts] = useState<RideSosAlert[]>([]);
+  const [sendingSos, setSendingSos] = useState(false);
+  const [updatingSosId, setUpdatingSosId] = useState<string | null>(null);
+  const [sosError, setSosError] = useState<string | null>(null);
 
   const elapsedRideSeconds = room
     ? room.elapsedSeconds +
@@ -350,6 +372,118 @@ useEffect(() => {
       cancelled = true;
     };
   }, [roomId]);
+
+  // Load SOS alerts and keep every ride participant in sync in real time.
+  useEffect(() => {
+    if (!roomId) {
+      setSosAlerts([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadSosAlerts = async () => {
+      const { data, error } = await supabase
+        .from('ride_sos_alerts')
+        .select('id, room_id, member_id, user_id, rider_name, latitude, longitude, message, status, created_at, acknowledged_at, resolved_at')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (cancelled) return;
+      if (error) {
+        console.error('Load SOS alerts failed:', error.message);
+        setSosError('Could not load SOS alerts. Please refresh the room.');
+        return;
+      }
+      setSosAlerts((data ?? []) as RideSosAlert[]);
+      setSosError(null);
+    };
+
+    void loadSosAlerts();
+    const channel = supabase
+      .channel(`ride-sos-${roomId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'ride_sos_alerts', filter: `room_id=eq.${roomId}`,
+      }, () => { void loadSosAlerts(); })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') void loadSosAlerts();
+      });
+
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(channel);
+    };
+  }, [roomId]);
+
+  const sendSosAlert = async () => {
+    if (!room || !activeMemberId || !activeRiderName || !currentUserId) {
+      setSosError('Join this ride with your rider profile before sending SOS.');
+      return;
+    }
+    if (room.status !== 'active' && room.status !== 'paused') {
+      setSosError('SOS is available after the ride starts.');
+      return;
+    }
+    const savedLocation = locations.find((item) => item.member_id === activeMemberId);
+    const coordinates = myLocation ?? (savedLocation
+      ? { latitude: savedLocation.latitude, longitude: savedLocation.longitude }
+      : null);
+    if (!coordinates) {
+      setSosError('GPS location is not available yet. Allow location access and try again.');
+      return;
+    }
+    if (!window.confirm('Send an emergency SOS to everyone in this ride group with your current location?')) return;
+
+    setSendingSos(true);
+    setSosError(null);
+    try {
+      const { error } = await supabase.from('ride_sos_alerts').insert({
+        room_id: room.id,
+        member_id: activeMemberId,
+        user_id: currentUserId,
+        rider_name: activeRiderName,
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        message: 'Emergency assistance needed',
+      });
+      if (error) {
+        if (error.code === '23505') throw new Error('You already have an unresolved SOS alert. The ride leader has been notified.');
+        throw error;
+      }
+      alert('SOS sent to your RideSync group. This does not contact emergency services.');
+    } catch (error) {
+      console.error('Send SOS failed:', error);
+      setSosError(error instanceof Error ? error.message : 'Could not send SOS. Please try again.');
+    } finally {
+      setSendingSos(false);
+    }
+  };
+
+  const updateSosAlert = async (alertId: string, status: 'acknowledged' | 'resolved') => {
+    if (!isRideLeader || updatingSosId) return;
+    setUpdatingSosId(alertId);
+    setSosError(null);
+    try {
+      const { error } = await supabase
+        .from('ride_sos_alerts')
+        .update({ status })
+        .eq('id', alertId);
+      if (error) throw error;
+      const { data } = await supabase
+        .from('ride_sos_alerts')
+        .select('id, room_id, member_id, user_id, rider_name, latitude, longitude, message, status, created_at, acknowledged_at, resolved_at')
+        .eq('id', alertId)
+        .maybeSingle();
+      if (data) {
+        setSosAlerts((current) => current.map((item) => item.id === alertId ? data as RideSosAlert : item));
+      }
+    } catch (error) {
+      console.error('Update SOS alert failed:', error);
+      setSosError(error instanceof Error ? error.message : 'Could not update SOS alert.');
+    } finally {
+      setUpdatingSosId(null);
+    }
+  };
 
   // 3. Save GPS for the exact rider profile selected in this tab.
   useEffect(() => {
@@ -902,6 +1036,91 @@ return () => {
             your location with people you trust.
           </p>
         </div>
+
+        {/* Emergency SOS */}
+        <section className="mb-6 rounded-2xl border border-red-200 bg-white p-5 shadow-card" aria-labelledby="sos-heading">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-700">
+                <Siren className="h-6 w-6" />
+              </span>
+              <div>
+                <h2 id="sos-heading" className="text-base font-bold text-charcoal">Emergency SOS</h2>
+                <p className="mt-1 max-w-xl text-xs leading-relaxed text-charcoal-muted">
+                  Send your name and current GPS coordinates to everyone in this ride group. The organiser can acknowledge and resolve the alert.
+                </p>
+              </div>
+            </div>
+            {!isRideLeader && (
+              <Button
+                type="button"
+                onClick={sendSosAlert}
+                loading={sendingSos}
+                disabled={!activeMemberId || (room.status !== 'active' && room.status !== 'paused')}
+                className="bg-red-600 hover:bg-red-700 active:bg-red-800"
+              >
+                <Siren className="h-4 w-4" /> Send SOS
+              </Button>
+            )}
+            {isRideLeader && (
+              <Button
+                type="button"
+                onClick={sendSosAlert}
+                loading={sendingSos}
+                disabled={!activeMemberId || (room.status !== 'active' && room.status !== 'paused')}
+                className="bg-red-600 hover:bg-red-700 active:bg-red-800"
+              >
+                <Siren className="h-4 w-4" /> Send SOS
+              </Button>
+            )}
+          </div>
+          {(room.status === 'waiting' || room.status === 'ended') && (
+            <p className="mt-3 text-xs text-charcoal-muted">SOS becomes available once the ride has started.</p>
+          )}
+          {!activeMemberId && (
+            <p className="mt-2 text-xs text-amber-700">Join this ride with a rider profile to send an SOS.</p>
+          )}
+          {sosError && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{sosError}</p>}
+
+          <div className="mt-4 space-y-3">
+            {sosAlerts.length === 0 ? (
+              <p className="rounded-lg bg-gray-50 px-3 py-3 text-xs text-charcoal-muted">No SOS alerts for this ride.</p>
+            ) : sosAlerts.map((alertItem) => (
+              <article key={alertItem.id} className={`rounded-xl border p-4 ${alertItem.status === 'resolved' ? 'border-gray-200 bg-gray-50' : 'border-red-200 bg-red-50'}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-charcoal">{alertItem.rider_name} needs help</p>
+                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase ${alertItem.status === 'pending' ? 'bg-red-200 text-red-800' : alertItem.status === 'acknowledged' ? 'bg-amber-200 text-amber-900' : 'bg-gray-200 text-gray-700'}`}>
+                    {alertItem.status}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-charcoal-muted">{alertItem.message} · {new Date(alertItem.created_at).toLocaleString()}</p>
+                <a
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-ridesync-700 underline"
+                  href={`https://www.google.com/maps?q=${alertItem.latitude},${alertItem.longitude}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <MapPinned className="h-3.5 w-3.5" /> Open SOS location in Maps
+                </a>
+                {isRideLeader && alertItem.status !== 'resolved' && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {alertItem.status === 'pending' && (
+                      <Button size="sm" type="button" loading={updatingSosId === alertItem.id} disabled={updatingSosId !== null && updatingSosId !== alertItem.id} onClick={() => updateSosAlert(alertItem.id, 'acknowledged')}>
+                        <CheckCircle2 className="h-4 w-4" /> Acknowledge
+                      </Button>
+                    )}
+                    <Button size="sm" type="button" variant="secondary" loading={updatingSosId === alertItem.id} disabled={updatingSosId !== null && updatingSosId !== alertItem.id} onClick={() => updateSosAlert(alertItem.id, 'resolved')}>
+                      Resolve alert
+                    </Button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] leading-relaxed text-charcoal-muted">
+            RideSync SOS only alerts members currently in this room. It does not call emergency services or replace local emergency numbers.
+          </p>
+        </section>
 
         <div className="grid gap-5 lg:grid-cols-3">
           {/* Live map */}
