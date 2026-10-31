@@ -853,9 +853,12 @@ return () => {
   }, [roomId]);
 
   const speedUnit = distanceUnit === 'mi' ? 'mph' : 'km/h';
-  const currentSpeed = speedMetersPerSecond === null
-    ? null
-    : speedMetersPerSecond * (distanceUnit === 'mi' ? 2.236936 : 3.6);
+  const gpsIsStale =
+    lastGpsUpdateAt !== null && now - lastGpsUpdateAt > 20000;
+  const currentSpeed =
+    speedMetersPerSecond === null || gpsIsStale
+      ? null
+      : speedMetersPerSecond * (distanceUnit === 'mi' ? 2.236936 : 3.6);
 
   const formatElapsedTime = (totalSeconds: number) => {
     const safeSeconds = Math.max(0, Math.floor(totalSeconds));
@@ -1040,7 +1043,7 @@ return () => {
               <LocateFixed className="h-5 w-5 shrink-0 text-blue-700" />
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-blue-900">
-                  {lastGpsUpdateAt && now - lastGpsUpdateAt > 20000
+                  {gpsIsStale
                     ? 'GPS signal is stale — waiting for a fresh fix'
                     : gpsStatus}
                 </p>
@@ -1056,6 +1059,7 @@ return () => {
               onClick={() => {
                 setLastGpsUpdateAt(null);
                 setGpsAccuracy(null);
+                setSpeedMetersPerSecond(null);
                 setGpsStatus('Restarting GPS…');
                 setGpsWatchAttempt((attempt) => attempt + 1);
               }}
