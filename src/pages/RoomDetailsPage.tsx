@@ -15,6 +15,7 @@ import {
   Siren,
   CheckCircle2,
   MapPinned,
+  Bell,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
@@ -124,6 +125,9 @@ export default function RoomDetailsPage() {
   const [sendingSos, setSendingSos] = useState(false);
   const [updatingSosId, setUpdatingSosId] = useState<string | null>(null);
   const [sosError, setSosError] = useState<string | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
+    typeof Notification === 'undefined' ? 'denied' : Notification.permission
+  );
 
   const elapsedRideSeconds = room
     ? room.elapsedSeconds +
@@ -427,7 +431,28 @@ useEffect(() => {
       .channel(`ride-sos-${roomId}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'ride_sos_alerts', filter: `room_id=eq.${roomId}`,
-      }, () => { void loadSosAlerts(); })
+      }, (payload) => {
+        void loadSosAlerts();
+        if (payload.eventType !== 'INSERT') return;
+        const incoming = payload.new as RideSosAlert;
+        if (incoming.user_id === currentUserId) return;
+
+        const title = `🚨 SOS: ${incoming.rider_name} needs help`;
+        const options: NotificationOptions = {
+          body: `${incoming.message} Open RideSync to view their live ride alert.`,
+          tag: `ridesync-sos-${incoming.id}`,
+          requireInteraction: true,
+          data: { url: window.location.href },
+        };
+
+        if (Notification.permission === 'granted') {
+          void navigator.serviceWorker.ready
+            .then((registration) => registration.showNotification(title, options))
+            .catch(() => {
+              new Notification(title, options);
+            });
+        }
+      })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') void loadSosAlerts();
       });
@@ -436,7 +461,29 @@ useEffect(() => {
       cancelled = true;
       void supabase.removeChannel(channel);
     };
-  }, [roomId]);
+  }, [roomId, currentUserId]);
+
+  const enableSosNotifications = async () => {
+    if (!('Notification' in window)) {
+      setSosError('This browser does not support system notifications.');
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission !== 'granted') {
+        setSosError('Notifications are blocked. Allow them in your browser site settings.');
+        return;
+      }
+      if ('serviceWorker' in navigator) {
+        await navigator.serviceWorker.register('/sw.js');
+      }
+      setSosError(null);
+    } catch (error) {
+      console.error('Enable SOS notifications failed:', error);
+      setSosError('Could not enable notifications in this browser.');
+    }
+  };
 
   const sendSosAlert = async () => {
     if (!room || !activeMemberId || !activeRiderName || !currentUserId) {
@@ -1112,6 +1159,9 @@ return () => {
                 <p className="mt-1 max-w-xl text-xs leading-relaxed text-charcoal-muted">
                   Send your name and current GPS coordinates to everyone in this ride group. The organiser can acknowledge and resolve the alert.
                 </p>
+                <p className="mt-2 text-xs font-medium text-charcoal-muted">
+                  System notifications: {notificationPermission === 'granted' ? 'Enabled' : notificationPermission === 'denied' ? 'Blocked in browser settings' : 'Not enabled'}
+                </p>
               </div>
             </div>
             {!isRideLeader && (
@@ -1134,6 +1184,11 @@ return () => {
                 className="bg-red-600 hover:bg-red-700 active:bg-red-800"
               >
                 <Siren className="h-4 w-4" /> Send SOS
+              </Button>
+            )}
+            {notificationPermission !== 'granted' && notificationPermission !== 'denied' && (
+              <Button type="button" variant="secondary" onClick={enableSosNotifications}>
+                <Bell className="h-4 w-4" /> Enable SOS notifications
               </Button>
             )}
           </div>
