@@ -446,11 +446,16 @@ useEffect(() => {
         };
 
         if (Notification.permission === 'granted') {
-          void navigator.serviceWorker.ready
-            .then((registration) => registration.showNotification(title, options))
-            .catch(() => {
-              new Notification(title, options);
-            });
+          if ('serviceWorker' in navigator) {
+            void navigator.serviceWorker.register('/sw.js')
+              .then((registration) => registration.showNotification(title, options))
+              .catch((error) => {
+                console.error('Show SOS notification failed:', error);
+                new Notification(title, options);
+              });
+          } else {
+            new Notification(title, options);
+          }
         }
       })
       .subscribe((status) => {
