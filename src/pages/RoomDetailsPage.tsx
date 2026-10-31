@@ -15,6 +15,7 @@ import {
   Siren,
   CheckCircle2,
   MapPinned,
+  Bell,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
@@ -92,8 +93,11 @@ export default function RoomDetailsPage() {
   const [speedometerOffset, setSpeedometerOffset] = useState({ x: 0, y: 0 });
   const speedometerDrag = useRef<{ pointerX: number; pointerY: number; offsetX: number; offsetY: number } | null>(null);
 
-  const [locationStatus, setLocationStatus] =
-    useState('Location not started');
+  const [gpsStatus, setGpsStatus] = useState('Waiting for GPS fix');
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [lastGpsUpdateAt, setLastGpsUpdateAt] = useState<number | null>(null);
+  const [gpsWatchAttempt, setGpsWatchAttempt] = useState(0);
+  const [locationStatus, setLocationStatus] = useState('Waiting to share location');
 
   const [room, setRoom] = useState<RideRoom | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -121,6 +125,9 @@ export default function RoomDetailsPage() {
   const [sendingSos, setSendingSos] = useState(false);
   const [updatingSosId, setUpdatingSosId] = useState<string | null>(null);
   const [sosError, setSosError] = useState<string | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
+    typeof Notification === 'undefined' ? 'denied' : Notification.permission
+  );
 
   const elapsedRideSeconds = room
     ? room.elapsedSeconds +
@@ -284,14 +291,14 @@ useEffect(() => {
   return () => window.clearInterval(interval);
 }, []);
 
-  // 1. Read GPS location from this device
+  // 1. Read GPS location from this device. The retry button restarts this watcher.
   useEffect(() => {
     if (!navigator.geolocation) {
-      setLocationStatus('GPS is not supported by this browser');
+      setGpsStatus('GPS is not supported by this browser');
       return;
     }
 
-    setLocationStatus('Requesting location permission...');
+    setGpsStatus('Requesting GPS permission…');
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
@@ -299,30 +306,40 @@ useEffect(() => {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         });
+        setGpsAccuracy(
+          Number.isFinite(position.coords.accuracy)
+            ? position.coords.accuracy
+            : null
+        );
+        setLastGpsUpdateAt(Date.now());
         setSpeedMetersPerSecond(
           typeof position.coords.speed === 'number' && Number.isFinite(position.coords.speed)
             ? Math.max(0, position.coords.speed)
             : null
         );
-        setLocationStatus('Location active');
+        setGpsStatus('GPS signal received');
       },
       (error) => {
         setSpeedMetersPerSecond(null);
-        setLocationStatus(
-          error.code === 1
-            ? 'Location permission denied'
-            : 'Unable to get location'
-        );
+        if (error.code === 1) {
+          setGpsStatus('Location permission denied. Allow location access in browser settings.');
+        } else if (error.code === 2) {
+          setGpsStatus('GPS position unavailable. Move near an open area and retry.');
+        } else if (error.code === 3) {
+          setGpsStatus('GPS is taking too long. Waiting for another fix…');
+        } else {
+          setGpsStatus('Could not read GPS location. Please retry.');
+        }
       },
       {
         enableHighAccuracy: true,
         maximumAge: 3000,
-        timeout: 15000,
+        timeout: 20000,
       }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, []);
+  }, [gpsWatchAttempt]);
 
   // 2. Load room details
   useEffect(() => {
@@ -414,7 +431,33 @@ useEffect(() => {
       .channel(`ride-sos-${roomId}`)
       .on('postgres_changes', {
         event: '*', schema: 'public', table: 'ride_sos_alerts', filter: `room_id=eq.${roomId}`,
-      }, () => { void loadSosAlerts(); })
+      }, (payload) => {
+        void loadSosAlerts();
+        if (payload.eventType !== 'INSERT') return;
+        const incoming = payload.new as RideSosAlert;
+        if (incoming.user_id === currentUserId) return;
+
+        const title = `🚨 SOS: ${incoming.rider_name} needs help`;
+        const options: NotificationOptions = {
+          body: `${incoming.message} Open RideSync to view their live ride alert.`,
+          tag: `ridesync-sos-${incoming.id}`,
+          requireInteraction: true,
+          data: { url: window.location.href },
+        };
+
+        if (Notification.permission === 'granted') {
+          if ('serviceWorker' in navigator) {
+            void navigator.serviceWorker.register('/sw.js')
+              .then((registration) => registration.showNotification(title, options))
+              .catch((error) => {
+                console.error('Show SOS notification failed:', error);
+                new Notification(title, options);
+              });
+          } else {
+            new Notification(title, options);
+          }
+        }
+      })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') void loadSosAlerts();
       });
@@ -423,7 +466,29 @@ useEffect(() => {
       cancelled = true;
       void supabase.removeChannel(channel);
     };
-  }, [roomId]);
+  }, [roomId, currentUserId]);
+
+  const enableSosNotifications = async () => {
+    if (!('Notification' in window)) {
+      setSosError('This browser does not support system notifications.');
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission !== 'granted') {
+        setSosError('Notifications are blocked. Allow them in your browser site settings.');
+        return;
+      }
+      if ('serviceWorker' in navigator) {
+        await navigator.serviceWorker.register('/sw.js');
+      }
+      setSosError(null);
+    } catch (error) {
+      console.error('Enable SOS notifications failed:', error);
+      setSosError('Could not enable notifications in this browser.');
+    }
+  };
 
   const sendSosAlert = async () => {
     if (!room || !activeMemberId || !activeRiderName || !currentUserId) {
@@ -840,9 +905,12 @@ return () => {
   }, [roomId]);
 
   const speedUnit = distanceUnit === 'mi' ? 'mph' : 'km/h';
-  const currentSpeed = speedMetersPerSecond === null
-    ? null
-    : speedMetersPerSecond * (distanceUnit === 'mi' ? 2.236936 : 3.6);
+  const gpsIsStale =
+    lastGpsUpdateAt !== null && now - lastGpsUpdateAt > 20000;
+  const currentSpeed =
+    speedMetersPerSecond === null || gpsIsStale
+      ? null
+      : speedMetersPerSecond * (distanceUnit === 'mi' ? 2.236936 : 3.6);
 
   const formatElapsedTime = (totalSeconds: number) => {
     const safeSeconds = Math.max(0, Math.floor(totalSeconds));
@@ -1020,20 +1088,52 @@ return () => {
           </div>
         </div>
 
-        {/* GPS status */}
+        {/* GPS and location-sharing status */}
         <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <div className="flex items-center gap-2">
-            <LocateFixed className="h-5 w-5 text-blue-700" />
-            <p className="text-sm font-semibold text-blue-900">
-              {locationStatus}
-            </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <LocateFixed className="h-5 w-5 shrink-0 text-blue-700" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-blue-900">
+                  {gpsIsStale
+                    ? 'GPS signal is stale — waiting for a fresh fix'
+                    : gpsStatus}
+                </p>
+                <p className="mt-0.5 text-xs text-blue-800">
+                  Location sharing: {locationStatus}
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setLastGpsUpdateAt(null);
+                setGpsAccuracy(null);
+                setSpeedMetersPerSecond(null);
+                setGpsStatus('Restarting GPS…');
+                setGpsWatchAttempt((attempt) => attempt + 1);
+              }}
+              disabled={!navigator.geolocation}
+            >
+              Retry GPS
+            </Button>
           </div>
 
           {myLocation && (
-            <p className="mt-2 text-xs text-blue-800">
-              Your coordinates: {myLocation.latitude.toFixed(5)},{' '}
-              {myLocation.longitude.toFixed(5)}
-            </p>
+            <div className="mt-2 space-y-1 text-xs text-blue-800">
+              <p>
+                Your coordinates: {myLocation.latitude.toFixed(5)},{' '}
+                {myLocation.longitude.toFixed(5)}
+              </p>
+              {gpsAccuracy !== null && (
+                <p>GPS accuracy: approximately ±{Math.round(gpsAccuracy)} metres</p>
+              )}
+              {lastGpsUpdateAt !== null && (
+                <p>Last GPS fix: {new Date(lastGpsUpdateAt).toLocaleTimeString()}</p>
+              )}
+            </div>
           )}
 
           {!activeRiderName && (
@@ -1064,6 +1164,9 @@ return () => {
                 <p className="mt-1 max-w-xl text-xs leading-relaxed text-charcoal-muted">
                   Send your name and current GPS coordinates to everyone in this ride group. The organiser can acknowledge and resolve the alert.
                 </p>
+                <p className="mt-2 text-xs font-medium text-charcoal-muted">
+                  System notifications: {notificationPermission === 'granted' ? 'Enabled' : notificationPermission === 'denied' ? 'Blocked in browser settings' : 'Not enabled'}
+                </p>
               </div>
             </div>
             {!isRideLeader && (
@@ -1086,6 +1189,11 @@ return () => {
                 className="bg-red-600 hover:bg-red-700 active:bg-red-800"
               >
                 <Siren className="h-4 w-4" /> Send SOS
+              </Button>
+            )}
+            {notificationPermission !== 'granted' && notificationPermission !== 'denied' && (
+              <Button type="button" variant="secondary" onClick={enableSosNotifications}>
+                <Bell className="h-4 w-4" /> Enable SOS notifications
               </Button>
             )}
           </div>
