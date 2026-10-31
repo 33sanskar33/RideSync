@@ -62,6 +62,13 @@ interface RideSosAlert {
   resolved_at: string | null;
 }
 
+const urlBase64ToUint8Array = (base64String: string) => {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map((character) => character.charCodeAt(0)));
+};
+
 export default function RoomDetailsPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const location = useLocation();
@@ -437,26 +444,7 @@ useEffect(() => {
         const incoming = payload.new as RideSosAlert;
         if (incoming.user_id === currentUserId) return;
 
-        const title = `🚨 SOS: ${incoming.rider_name} needs help`;
-        const options: NotificationOptions = {
-          body: `${incoming.message} Open RideSync to view their live ride alert.`,
-          tag: `ridesync-sos-${incoming.id}`,
-          requireInteraction: true,
-          data: { url: window.location.href },
-        };
-
-        if (Notification.permission === 'granted') {
-          if ('serviceWorker' in navigator) {
-            void navigator.serviceWorker.register('/sw.js')
-              .then((registration) => registration.showNotification(title, options))
-              .catch((error) => {
-                console.error('Show SOS notification failed:', error);
-                new Notification(title, options);
-              });
-          } else {
-            new Notification(title, options);
-          }
-        }
+        // System notifications are sent through Web Push so they can arrive while the app is closed.
       })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') void loadSosAlerts();
@@ -469,8 +457,12 @@ useEffect(() => {
   }, [roomId, currentUserId]);
 
   const enableSosNotifications = async () => {
-    if (!('Notification' in window)) {
-      setSosError('This browser does not support system notifications.');
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setSosError('This browser does not support background push notifications. Try a supported browser.');
+      return;
+    }
+    if (!currentUserId) {
+      setSosError('Sign in before enabling SOS notifications.');
       return;
     }
     try {
@@ -480,13 +472,29 @@ useEffect(() => {
         setSosError('Notifications are blocked. Allow them in your browser site settings.');
         return;
       }
-      if ('serviceWorker' in navigator) {
-        await navigator.serviceWorker.register('/sw.js');
-      }
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+      const existing = await registration.pushManager.getSubscription();
+      const subscription = existing ?? await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array('BNcwO6m4zhBMmcgHDTIMgwSdzxtCD-uKQw4EHn-6YTMvsahxZxGpU465_N0phndWJx6-s8N8nxGsVGEqwFlU048'),
+      });
+      const subscriptionJson = subscription.toJSON();
+      const keys = subscriptionJson.keys;
+      if (!subscriptionJson.endpoint || !keys?.p256dh || !keys.auth) throw new Error('The browser did not return a complete push subscription.');
+      const { error } = await supabase.from('ride_push_subscriptions').upsert({
+        user_id: currentUserId,
+        endpoint: subscriptionJson.endpoint,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'endpoint' });
+      if (error) throw error;
       setSosError(null);
+      alert('Background SOS notifications enabled on this device.');
     } catch (error) {
       console.error('Enable SOS notifications failed:', error);
-      setSosError('Could not enable notifications in this browser.');
+      setSosError(error instanceof Error ? error.message : 'Could not enable background notifications.');
     }
   };
 
@@ -512,7 +520,7 @@ useEffect(() => {
     setSendingSos(true);
     setSosError(null);
     try {
-      const { error } = await supabase.from('ride_sos_alerts').insert({
+      const { data: createdAlert, error } = await supabase.from('ride_sos_alerts').insert({
         room_id: room.id,
         member_id: activeMemberId,
         user_id: currentUserId,
@@ -520,12 +528,22 @@ useEffect(() => {
         latitude: coordinates.latitude,
         longitude: coordinates.longitude,
         message: 'Emergency assistance needed',
-      });
+      }).select('id').single();
       if (error) {
         if (error.code === '23505') throw new Error('You already have an unresolved SOS alert. The ride leader has been notified.');
         throw error;
       }
-      alert('SOS sent to your RideSync group. This does not contact emergency services.');
+      const { data: pushResult, error: pushError } = await supabase.functions.invoke('send-sos-push', {
+        body: { alertId: createdAlert.id },
+      });
+      if (pushError) {
+        console.error('Background SOS push delivery failed:', pushError);
+        alert('SOS saved in RideSync. Background push could not be delivered; online members will still see the alert.');
+      } else if (pushResult?.sent > 0) {
+        alert(`SOS sent. Background notifications delivered to ${pushResult.sent} device(s).`);
+      } else {
+        alert('SOS saved in RideSync. No other riders have enabled background notifications yet.');
+      }
     } catch (error) {
       console.error('Send SOS failed:', error);
       setSosError(error instanceof Error ? error.message : 'Could not send SOS. Please try again.');
@@ -1191,9 +1209,9 @@ return () => {
                 <Siren className="h-4 w-4" /> Send SOS
               </Button>
             )}
-            {notificationPermission !== 'granted' && notificationPermission !== 'denied' && (
+            {notificationPermission !== 'denied' && (
               <Button type="button" variant="secondary" onClick={enableSosNotifications}>
-                <Bell className="h-4 w-4" /> Enable SOS notifications
+                <Bell className="h-4 w-4" /> Enable background SOS alerts
               </Button>
             )}
           </div>
