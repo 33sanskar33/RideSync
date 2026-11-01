@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Settings, Bell, MapPin, Moon, Globe, Gauge, Save } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
+import DeleteAccountSection from '@/components/DeleteAccountSection';
 import { supabase } from '@/lib/supabase';
 
 type DistanceUnit = 'km' | 'mi';
@@ -198,6 +199,8 @@ export default function SettingsPage() {
             );
           })}
         </section>
+
+        <DeleteAccountSection />
       </div>
     </DashboardLayout>
   );
