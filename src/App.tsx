@@ -9,6 +9,8 @@ import SettingsPage from '@/pages/SettingsPage';
 import StatisticsPage from '@/pages/StatisticsPage';
 import RideHistoryPage from '@/pages/RideHistoryPage';
 import RoomDetailsPage from '@/pages/RoomDetailsPage';
+import PrivacyPolicyPage from '@/pages/PrivacyPolicyPage';
+import TermsPage from '@/pages/TermsPage';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 export default function App() {
@@ -17,6 +19,8 @@ export default function App() {
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/privacy" element={<PrivacyPolicyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route element={<ProtectedRoute />}>
