@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, User, Settings, LogOut, Menu, X, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, Menu, X, BarChart3, History } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import Logo from './Logo';
@@ -99,6 +99,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const navLinks = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/dashboard/statistics', label: 'Statistics', icon: BarChart3 },
+    { to: '/dashboard/history', label: 'Ride History', icon: History },
     { to: '/dashboard/profile', label: 'Profile', icon: User },
     { to: '/dashboard/settings', label: 'Settings', icon: Settings },
   ];
@@ -137,6 +138,18 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               >
                 <BarChart3 className="h-4 w-4" aria-hidden="true" />
                 Statistics
+              </Link>
+              <Link
+                to="/dashboard/history"
+                className={[
+                  'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  isActive('/dashboard/history')
+                    ? 'bg-ridesync-50 text-ridesync-700'
+                    : 'text-charcoal-muted hover:bg-gray-100 hover:text-charcoal-soft',
+                ].join(' ')}
+              >
+                <History className="h-4 w-4" aria-hidden="true" />
+                Ride History
               </Link>
             </nav>
           </div>
