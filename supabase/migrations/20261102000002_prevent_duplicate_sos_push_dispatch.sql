@@ -10,6 +10,6 @@ CREATE TABLE IF NOT EXISTS public.ride_sos_push_dispatches (
 ALTER TABLE public.ride_sos_push_dispatches ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL PRIVILEGES ON TABLE public.ride_sos_push_dispatches
-  FROM PUBLIC, anon, authenticated;
+  FROM PUBLIC, anon, authenticated, service_role;
 
-GRANT SELECT, INSERT ON TABLE public.ride_sos_push_dispatches TO service_role;
+GRANT INSERT ON TABLE public.ride_sos_push_dispatches TO service_role;
