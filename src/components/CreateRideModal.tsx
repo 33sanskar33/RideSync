@@ -134,9 +134,15 @@ export default function CreateRideModal({ open, onClose }: CreateRideModalProps)
         sessionError: sessionError?.message ?? null,
       });
 
-      const segment = () =>
-        Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, '0');
-      const code = `RIDE-${segment()}`;
+      // 32-character alphabet + 10 cryptographically random symbols = 50 bits.
+      // Masking is unbiased because the alphabet length is exactly 32.
+      const roomCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const randomBytes = crypto.getRandomValues(new Uint8Array(10));
+      const roomCodeSuffix = Array.from(
+        randomBytes,
+        (byte) => roomCodeAlphabet[byte & 31],
+      ).join('');
+      const code = `RIDE-${roomCodeSuffix}`;
 
       const { data, error } = await supabase
         .from('ride_rooms')

@@ -18,9 +18,28 @@ Deno.serve(async (req) => {
     const { alertId } = await req.json();
     if (typeof alertId !== "string" || alertId.length > 64) return Response.json({ error: "Invalid alertId" }, { status: 400, headers: cors });
     const admin = createClient(url, secretApiKey, { auth: { persistSession: false, autoRefreshToken: false } });
-    const { data: alert, error: alertError } = await admin.from("ride_sos_alerts").select("id, room_id, user_id, rider_name, message, latitude, longitude").eq("id", alertId).maybeSingle();
+    const { data: alert, error: alertError } = await admin
+      .from("ride_sos_alerts")
+      .select("id, room_id, user_id, rider_name, message, latitude, longitude, status")
+      .eq("id", alertId)
+      .maybeSingle();
     if (alertError) throw alertError;
-    if (!alert || alert.user_id !== user.id) return Response.json({ error: "SOS alert not found for this user" }, { status: 403, headers: cors });
+    if (!alert || alert.user_id !== user.id) {
+      return Response.json({ error: "SOS alert not found for this user" }, { status: 403, headers: cors });
+    }
+    if (alert.status !== "pending") {
+      return Response.json({ error: "This SOS alert is no longer pending" }, { status: 409, headers: cors });
+    }
+
+    const { data: room, error: roomError } = await admin
+      .from("ride_rooms")
+      .select("status")
+      .eq("id", alert.room_id)
+      .maybeSingle();
+    if (roomError) throw roomError;
+    if (!room || (room.status !== "active" && room.status !== "paused")) {
+      return Response.json({ error: "This ride is no longer active" }, { status: 409, headers: cors });
+    }
     const { data: members, error: membersError } = await admin.from("ride_members").select("user_id").eq("room_id", alert.room_id).neq("user_id", user.id).not("user_id", "is", null);
     if (membersError) throw membersError;
     const recipientIds = [...new Set((members ?? []).map((member) => member.user_id).filter(Boolean))];
@@ -32,8 +51,20 @@ Deno.serve(async (req) => {
     const vapidPrivate = Deno.env.get("VAPID_PRIVATE_KEY");
     if (!vapidPublic || !vapidPrivate) throw new Error("VAPID keys are not configured");
     webpush.setVapidDetails("https://github.com/33sanskar33/RideSync", vapidPublic, vapidPrivate);
-    const origin = req.headers.get("origin") ?? "https://ridesync.app";
-    const payload = JSON.stringify({ title: `🚨 SOS: ${alert.rider_name} needs help`, body: alert.message || "Emergency assistance needed", url: `${origin}/room/${alert.room_id}`, tag: `ridesync-sos-${alert.id}`, latitude: alert.latitude, longitude: alert.longitude });
+
+    // The unique alert_id makes push delivery one-shot, even for concurrent/replayed requests.
+    const { error: dispatchError } = await admin
+      .from("ride_sos_push_dispatches")
+      .insert({ alert_id: alert.id });
+    if (dispatchError) {
+      if (dispatchError.code === "23505") {
+        return Response.json({ error: "A background notification was already attempted for this SOS alert" }, { status: 409, headers: cors });
+      }
+      throw dispatchError;
+    }
+
+    const appBaseUrl = "https://ride-sync-7lik.vercel.app";
+    const payload = JSON.stringify({ title: `🚨 SOS: ${alert.rider_name} needs help`, body: alert.message || "Emergency assistance needed", url: `${appBaseUrl}/room/${alert.room_id}`, tag: `ridesync-sos-${alert.id}`, latitude: alert.latitude, longitude: alert.longitude });
     const results = await Promise.allSettled(subscriptions.map(async (sub) => {
       try {
         await webpush.sendNotification(
