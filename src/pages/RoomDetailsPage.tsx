@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import RideLiveMap, {
@@ -12,10 +12,15 @@ import {
   Navigation,
   ArrowLeft,
   Info,
+  Siren,
+  CheckCircle2,
+  MapPinned,
+  Bell,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
 import CopyCodeButton from '@/components/CopyCodeButton';
+import RideGroupChat from '@/components/RideGroupChat';
 
 interface RideRoom {
   id: string;
@@ -25,8 +30,13 @@ interface RideRoom {
   destinationLat: number | null;
   destinationLng: number | null;
   createdAt: number;
-  status: 'waiting' | 'active' | 'ended';
+  status: 'waiting' | 'active' | 'paused' | 'ended';
   createdBy: string | null;
+  elapsedSeconds: number;
+  startedAt: string | null;
+  activeSince: string | null;
+  pausedAt: string | null;
+  endedAt: string | null;
 }
 
 interface Rider {
@@ -34,7 +44,30 @@ interface Rider {
   rider_name: string;
   joined_at: string;
   user_id?: string | null;
+  is_leader?: boolean;
 }
+
+interface RideSosAlert {
+  id: string;
+  room_id: string;
+  member_id: string;
+  user_id: string;
+  rider_name: string;
+  latitude: number;
+  longitude: number;
+  message: string;
+  status: 'pending' | 'acknowledged' | 'resolved';
+  created_at: string;
+  acknowledged_at: string | null;
+  resolved_at: string | null;
+}
+
+const urlBase64ToUint8Array = (base64String: string) => {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map((character) => character.charCodeAt(0)));
+};
 
 export default function RoomDetailsPage() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -63,9 +96,15 @@ export default function RoomDetailsPage() {
     latitude: number;
     longitude: number;
   } | null>(null);
+  const [speedMetersPerSecond, setSpeedMetersPerSecond] = useState<number | null>(null);
+  const [speedometerOffset, setSpeedometerOffset] = useState({ x: 0, y: 0 });
+  const speedometerDrag = useRef<{ pointerX: number; pointerY: number; offsetX: number; offsetY: number } | null>(null);
 
-  const [locationStatus, setLocationStatus] =
-    useState('Location not started');
+  const [gpsStatus, setGpsStatus] = useState('Waiting for GPS fix');
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [lastGpsUpdateAt, setLastGpsUpdateAt] = useState<number | null>(null);
+  const [gpsWatchAttempt, setGpsWatchAttempt] = useState(0);
+  const [locationStatus, setLocationStatus] = useState('Waiting to share location');
 
   const [room, setRoom] = useState<RideRoom | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -88,6 +127,21 @@ export default function RoomDetailsPage() {
   }>>([]);
   
   const [now, setNow] = useState(Date.now());
+  const [updatingRideStatus, setUpdatingRideStatus] = useState(false);
+  const [sosAlerts, setSosAlerts] = useState<RideSosAlert[]>([]);
+  const [sendingSos, setSendingSos] = useState(false);
+  const [updatingSosId, setUpdatingSosId] = useState<string | null>(null);
+  const [sosError, setSosError] = useState<string | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
+    typeof Notification === 'undefined' ? 'denied' : Notification.permission
+  );
+
+  const elapsedRideSeconds = room
+    ? room.elapsedSeconds +
+      (room.status === 'active' && room.activeSince
+        ? Math.max(0, Math.floor((now - new Date(room.activeSince).getTime()) / 1000))
+        : 0)
+    : 0;
 
   
 useEffect(() => {
@@ -144,39 +198,94 @@ useEffect(() => {
   };
 }, [roomId, activeMemberId]);
 
+// If the creator opens the room from a fresh tab, restore their leader rider profile.
+useEffect(() => {
+  if (!roomId || !room?.createdBy || !currentUserId) return;
+  if (room.createdBy !== currentUserId || activeMemberId) return;
+
+  let cancelled = false;
+  async function loadLeaderMembership() {
+    const { data, error } = await supabase
+      .from('ride_members')
+      .select('id, rider_name')
+      .eq('room_id', roomId)
+      .eq('user_id', currentUserId)
+      .eq('is_leader', true)
+      .maybeSingle();
+
+    if (cancelled) return;
+    if (error) {
+      console.error('Load leader membership failed:', error.message);
+      return;
+    }
+    if (data) {
+      setMembershipRiderName(data.rider_name);
+      setActiveMemberId(data.id);
+      sessionStorage.setItem(`ridesync-active-member-${roomId}`, data.id);
+    }
+  }
+
+  void loadLeaderMembership();
+  return () => {
+    cancelled = true;
+  };
+}, [roomId, room?.createdBy, currentUserId, activeMemberId]);
+
 const isRideLeader = Boolean(
   room?.createdBy &&
   currentUserId &&
-  room.createdBy === currentUserId &&
-  !activeRiderName
+  room.createdBy === currentUserId
 );
 
-const updateRideStatus = async (status: 'active' | 'ended') => {
-  if (!room || !isRideLeader) {
-    alert('Only the person who created this ride can start or end it.');
+const updateRideStatus = async (status: 'active' | 'paused' | 'ended') => {
+  if (!room || !isRideLeader || updatingRideStatus) {
+    if (!isRideLeader) {
+      alert('Only the person who created this ride can control its status.');
+    }
     return;
   }
 
+  if (status === 'ended' && !window.confirm('End this ride for everyone? This cannot be undone.')) {
+    return;
+  }
+
+  setUpdatingRideStatus(true);
   try {
     const { data, error } = await supabase
       .from('ride_rooms')
       .update({ status })
       .eq('id', room.id)
-      .select('id')
+      .select('id, status, elapsed_seconds, started_at, active_since, paused_at, ended_at')
       .maybeSingle();
 
     if (error) throw error;
 
     if (!data) {
-      throw new Error('Room status update failed');
+      throw new Error('Ride status was not updated. Check that you are the ride creator.');
     }
 
+    // Apply the database-generated timer timestamps immediately. In particular,
+    // waiting -> active must set activeSince now, without waiting for Realtime.
     setRoom((current) =>
-      current ? { ...current, status } : current
+      current
+        ? {
+            ...current,
+            status: data.status,
+            elapsedSeconds: data.elapsed_seconds ?? 0,
+            startedAt: data.started_at ?? null,
+            activeSince: data.active_since ?? null,
+            pausedAt: data.paused_at ?? null,
+            endedAt: data.ended_at ?? null,
+          }
+        : current
     );
   } catch (error) {
     console.error('Update ride status failed:', error);
-    alert('Could not update ride status. Please try again.');
+    const message =
+      error instanceof Error ? error.message : 'Could not update ride status. Please try again.';
+    alert(message);
+  } finally {
+    setUpdatingRideStatus(false);
   }
 };
 
@@ -184,19 +293,19 @@ const updateRideStatus = async (status: 'active' | 'ended') => {
 useEffect(() => {
   const interval = window.setInterval(() => {
     setNow(Date.now());
-  }, 5000);
+  }, 1000);
 
   return () => window.clearInterval(interval);
 }, []);
 
-  // 1. Read GPS location from this device
+  // 1. Read GPS location from this device. The retry button restarts this watcher.
   useEffect(() => {
     if (!navigator.geolocation) {
-      setLocationStatus('GPS is not supported by this browser');
+      setGpsStatus('GPS is not supported by this browser');
       return;
     }
 
-    setLocationStatus('Requesting location permission...');
+    setGpsStatus('Requesting GPS permission…');
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
@@ -204,24 +313,40 @@ useEffect(() => {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         });
-        setLocationStatus('Location active');
+        setGpsAccuracy(
+          Number.isFinite(position.coords.accuracy)
+            ? position.coords.accuracy
+            : null
+        );
+        setLastGpsUpdateAt(Date.now());
+        setSpeedMetersPerSecond(
+          typeof position.coords.speed === 'number' && Number.isFinite(position.coords.speed)
+            ? Math.max(0, position.coords.speed)
+            : null
+        );
+        setGpsStatus('GPS signal received');
       },
       (error) => {
-        setLocationStatus(
-          error.code === 1
-            ? 'Location permission denied'
-            : 'Unable to get location'
-        );
+        setSpeedMetersPerSecond(null);
+        if (error.code === 1) {
+          setGpsStatus('Location permission denied. Allow location access in browser settings.');
+        } else if (error.code === 2) {
+          setGpsStatus('GPS position unavailable. Move near an open area and retry.');
+        } else if (error.code === 3) {
+          setGpsStatus('GPS is taking too long. Waiting for another fix…');
+        } else {
+          setGpsStatus('Could not read GPS location. Please retry.');
+        }
       },
       {
         enableHighAccuracy: true,
         maximumAge: 3000,
-        timeout: 15000,
+        timeout: 20000,
       }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, []);
+  }, [gpsWatchAttempt]);
 
   // 2. Load room details
   useEffect(() => {
@@ -239,7 +364,7 @@ useEffect(() => {
       try {
         const { data, error } = await supabase
           .from('ride_rooms')
-          .select('id, room_code, ride_name, destination, destination_lat, destination_lng, created_at, status, created_by')
+          .select('id, room_code, ride_name, destination, destination_lat, destination_lng, created_at, status, created_by, elapsed_seconds, started_at, active_since, paused_at, ended_at')
           .eq('id', roomId)
           .maybeSingle();
 
@@ -258,6 +383,11 @@ useEffect(() => {
                   createdAt: new Date(data.created_at).getTime(),
                   status: data.status ?? 'waiting',
                   createdBy: data.created_by ?? null,
+                  elapsedSeconds: data.elapsed_seconds ?? 0,
+                  startedAt: data.started_at ?? null,
+                  activeSince: data.active_since ?? null,
+                  pausedAt: data.paused_at ?? null,
+                  endedAt: data.ended_at ?? null,
                 }
               : null
           );
@@ -276,6 +406,208 @@ useEffect(() => {
       cancelled = true;
     };
   }, [roomId]);
+
+  // Load SOS alerts and keep every ride participant in sync in real time.
+  useEffect(() => {
+    if (!roomId) {
+      setSosAlerts([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadSosAlerts = async () => {
+      const { data, error } = await supabase
+        .from('ride_sos_alerts')
+        .select('id, room_id, member_id, user_id, rider_name, latitude, longitude, message, status, created_at, acknowledged_at, resolved_at')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (cancelled) return;
+      if (error) {
+        console.error('Load SOS alerts failed:', error.message);
+        setSosError('Could not load SOS alerts. Please refresh the room.');
+        return;
+      }
+      setSosAlerts((data ?? []) as RideSosAlert[]);
+      setSosError(null);
+    };
+
+    void loadSosAlerts();
+    const channel = supabase
+      .channel(`ride-sos-${roomId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'ride_sos_alerts', filter: `room_id=eq.${roomId}`,
+      }, (payload) => {
+        void loadSosAlerts();
+        if (payload.eventType !== 'INSERT') return;
+        const incoming = payload.new as RideSosAlert;
+        if (incoming.user_id === currentUserId) return;
+
+        // System notifications are sent through Web Push so they can arrive while the app is closed.
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') void loadSosAlerts();
+      });
+
+    return () => {
+      cancelled = true;
+      void supabase.removeChannel(channel);
+    };
+  }, [roomId, currentUserId]);
+
+  const enableSosNotifications = async () => {
+    if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+      setSosError('This browser does not support background push notifications. Try a supported browser.');
+      return;
+    }
+    if (!currentUserId) {
+      setSosError('Sign in before enabling SOS notifications.');
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission !== 'granted') {
+        setSosError('Notifications are blocked. Allow them in your browser site settings.');
+        return;
+      }
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+      const { data: vapidData, error: vapidError } = await supabase.functions.invoke('get-vapid-public-key');
+      if (vapidError) throw new Error(`Could not load push configuration: ${vapidError.message}`);
+      const vapidPublicKey = vapidData?.publicKey;
+      if (typeof vapidPublicKey !== 'string' || !vapidPublicKey) {
+        throw new Error('Push notifications are not configured on the server yet.');
+      }
+      const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
+      let subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        const existingKey = subscription.options.applicationServerKey;
+        const sameKey = Boolean(
+          existingKey &&
+          existingKey.byteLength === applicationServerKey.byteLength &&
+          new Uint8Array(existingKey).every((value, index) => value === applicationServerKey[index])
+        );
+        if (!sameKey) {
+          const oldEndpoint = subscription.endpoint;
+          await subscription.unsubscribe();
+          const { error: removeError } = await supabase
+            .from('ride_push_subscriptions')
+            .delete()
+            .eq('endpoint', oldEndpoint);
+          if (removeError) console.warn('Could not remove the previous push subscription:', removeError.message);
+          subscription = null;
+        }
+      }
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey,
+        });
+      }
+      const subscriptionJson = subscription.toJSON();
+      const keys = subscriptionJson.keys;
+      if (!subscriptionJson.endpoint || !keys?.p256dh || !keys.auth) throw new Error('The browser did not return a complete push subscription.');
+      const { error } = await supabase.from('ride_push_subscriptions').upsert({
+        user_id: currentUserId,
+        endpoint: subscriptionJson.endpoint,
+        p256dh: keys.p256dh,
+        auth: keys.auth,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'endpoint' });
+      if (error) throw error;
+      setSosError(null);
+      alert('Background SOS notifications enabled on this device.');
+    } catch (error) {
+      console.error('Enable SOS notifications failed:', error);
+      setSosError(error instanceof Error ? error.message : 'Could not enable background notifications.');
+    }
+  };
+
+  const sendSosAlert = async () => {
+    if (!room || !activeMemberId || !activeRiderName || !currentUserId) {
+      setSosError('Join this ride with your rider profile before sending SOS.');
+      return;
+    }
+    if (room.status !== 'active' && room.status !== 'paused') {
+      setSosError('SOS is available after the ride starts.');
+      return;
+    }
+    const savedLocation = locations.find((item) => item.member_id === activeMemberId);
+    const coordinates = myLocation ?? (savedLocation
+      ? { latitude: savedLocation.latitude, longitude: savedLocation.longitude }
+      : null);
+    if (!coordinates) {
+      setSosError('GPS location is not available yet. Allow location access and try again.');
+      return;
+    }
+    if (!window.confirm('Send an emergency SOS to everyone in this ride group with your current location?')) return;
+
+    setSendingSos(true);
+    setSosError(null);
+    try {
+      const { data: createdAlert, error } = await supabase.from('ride_sos_alerts').insert({
+        room_id: room.id,
+        member_id: activeMemberId,
+        user_id: currentUserId,
+        rider_name: activeRiderName,
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        message: 'Emergency assistance needed',
+      }).select('id').single();
+      if (error) {
+        if (error.code === '23505') throw new Error('You already have an unresolved SOS alert. The ride leader has been notified.');
+        throw error;
+      }
+      const { data: pushResult, error: pushError } = await supabase.functions.invoke('send-sos-push', {
+        body: { alertId: createdAlert.id },
+      });
+      if (pushError) {
+        console.error('Background SOS push delivery failed:', pushError);
+        alert('SOS saved in RideSync. Background push could not be delivered; online members will still see the alert.');
+      } else if (pushResult?.sent > 0 && pushResult?.failed > 0) {
+        alert(`SOS delivered to ${pushResult.sent} device(s); ${pushResult.failed} device(s) could not be reached. Online members will still see the alert.`);
+      } else if (pushResult?.sent > 0) {
+        alert(`SOS sent. Background notifications delivered to ${pushResult.sent} device(s).`);
+      } else if (pushResult?.failed > 0) {
+        alert(`SOS saved in RideSync, but push delivery failed for ${pushResult.failed} subscribed device(s). Check the Edge Function logs.`);
+      } else {
+        alert('SOS saved in RideSync. No other riders have enabled background notifications yet.');
+      }
+    } catch (error) {
+      console.error('Send SOS failed:', error);
+      setSosError(error instanceof Error ? error.message : 'Could not send SOS. Please try again.');
+    } finally {
+      setSendingSos(false);
+    }
+  };
+
+  const updateSosAlert = async (alertId: string, status: 'acknowledged' | 'resolved') => {
+    if (!isRideLeader || updatingSosId) return;
+    setUpdatingSosId(alertId);
+    setSosError(null);
+    try {
+      const { error } = await supabase
+        .from('ride_sos_alerts')
+        .update({ status })
+        .eq('id', alertId);
+      if (error) throw error;
+      const { data } = await supabase
+        .from('ride_sos_alerts')
+        .select('id, room_id, member_id, user_id, rider_name, latitude, longitude, message, status, created_at, acknowledged_at, resolved_at')
+        .eq('id', alertId)
+        .maybeSingle();
+      if (data) {
+        setSosAlerts((current) => current.map((item) => item.id === alertId ? data as RideSosAlert : item));
+      }
+    } catch (error) {
+      console.error('Update SOS alert failed:', error);
+      setSosError(error instanceof Error ? error.message : 'Could not update SOS alert.');
+    } finally {
+      setUpdatingSosId(null);
+    }
+  };
 
   // 3. Save GPS for the exact rider profile selected in this tab.
   useEffect(() => {
@@ -336,7 +668,7 @@ useEffect(() => {
     async function loadRiders() {
       const { data, error } = await supabase
         .from('ride_members')
-        .select('id, rider_name, joined_at, user_id')
+        .select('id, rider_name, joined_at, user_id, is_leader')
         .eq('room_id', roomId)
         .order('joined_at', { ascending: true });
 
@@ -385,7 +717,12 @@ const channel = supabase
         destination_lat: number | null;
         destination_lng: number | null;
         created_at: string;
-        status: 'waiting' | 'active' | 'ended';
+        status: 'waiting' | 'active' | 'paused' | 'ended';
+        elapsed_seconds: number;
+        started_at: string | null;
+        active_since: string | null;
+        paused_at: string | null;
+        ended_at: string | null;
       };
 
       setRoom((current) =>
@@ -399,6 +736,11 @@ const channel = supabase
               destinationLng: updatedRoom.destination_lng ?? null,
               createdAt: new Date(updatedRoom.created_at).getTime(),
               status: updatedRoom.status,
+              elapsedSeconds: updatedRoom.elapsed_seconds ?? 0,
+              startedAt: updatedRoom.started_at ?? null,
+              activeSince: updatedRoom.active_since ?? null,
+              pausedAt: updatedRoom.paused_at ?? null,
+              endedAt: updatedRoom.ended_at ?? null,
             }
           : current
       );
@@ -611,6 +953,24 @@ return () => {
     };
   }, [roomId]);
 
+  const speedUnit = distanceUnit === 'mi' ? 'mph' : 'km/h';
+  const gpsIsStale =
+    lastGpsUpdateAt !== null && now - lastGpsUpdateAt > 20000;
+  const currentSpeed =
+    speedMetersPerSecond === null || gpsIsStale
+      ? null
+      : speedMetersPerSecond * (distanceUnit === 'mi' ? 2.236936 : 3.6);
+
+  const formatElapsedTime = (totalSeconds: number) => {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(safeSeconds / 3600);
+    const minutes = Math.floor((safeSeconds % 3600) / 60);
+    const seconds = safeSeconds % 60;
+    return [hours, minutes, seconds]
+      .map((value) => String(value).padStart(2, '0'))
+      .join(':');
+  };
+
   const formatRouteDistance = (meters: number) =>
     distanceUnit === 'mi'
       ? `${(meters / 1609.344).toFixed(1)} mi`
@@ -688,31 +1048,75 @@ return () => {
     className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-sm font-semibold ${
       room.status === 'active'
         ? 'bg-green-100 text-green-700'
-        : room.status === 'ended'
-          ? 'bg-gray-200 text-gray-700'
-          : 'bg-amber-100 text-amber-700'
+        : room.status === 'paused'
+          ? 'bg-orange-100 text-orange-700'
+          : room.status === 'ended'
+            ? 'bg-gray-200 text-gray-700'
+            : 'bg-amber-100 text-amber-700'
     }`}
   >
     {room.status === 'active'
       ? 'Ride Active'
-      : room.status === 'ended'
-        ? 'Ride Ended'
-        : 'Waiting to Start'}
+      : room.status === 'paused'
+        ? 'Ride Paused'
+        : room.status === 'ended'
+          ? 'Ride Ended'
+          : 'Waiting to Start'}
   </span>
 
+  <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+    <p className="text-xs text-charcoal-muted">Total ride time</p>
+    <p className="mt-0.5 font-mono text-xl font-bold tabular-nums text-charcoal" aria-live="off">
+      {formatElapsedTime(elapsedRideSeconds)}
+    </p>
+    <p className="mt-0.5 text-[11px] text-charcoal-muted">
+      {room.status === 'waiting'
+        ? 'Starts when the leader starts the ride'
+        : room.status === 'active'
+          ? 'Timer running'
+          : room.status === 'paused'
+            ? 'Timer paused'
+            : 'Final ride duration'}
+    </p>
+  </div>
+
   {isRideLeader && room.status === 'waiting' && (
-    <Button onClick={() => updateRideStatus('active')}>
+    <Button onClick={() => updateRideStatus('active')} loading={updatingRideStatus}>
       Start Ride
     </Button>
   )}
 
   {isRideLeader && room.status === 'active' && (
-    <Button
-      variant="secondary"
-      onClick={() => updateRideStatus('ended')}
-    >
-      End Ride
-    </Button>
+    <div className="flex flex-wrap gap-2">
+      <Button
+        variant="secondary"
+        onClick={() => updateRideStatus('paused')}
+        loading={updatingRideStatus}
+      >
+        Pause Ride
+      </Button>
+      <Button
+        onClick={() => updateRideStatus('ended')}
+        disabled={updatingRideStatus}
+      >
+        End Ride
+      </Button>
+    </div>
+  )}
+
+  {isRideLeader && room.status === 'paused' && (
+    <div className="flex flex-wrap gap-2">
+      <Button onClick={() => updateRideStatus('active')} loading={updatingRideStatus}>
+        Resume Ride
+      </Button>
+      <Button
+        variant="secondary"
+        onClick={() => updateRideStatus('ended')}
+        disabled={updatingRideStatus}
+      >
+        End Ride
+      </Button>
+    </div>
   )}
 
   {!isRideLeader && room.status !== 'ended' && (
@@ -733,20 +1137,52 @@ return () => {
           </div>
         </div>
 
-        {/* GPS status */}
+        {/* GPS and location-sharing status */}
         <div className="mb-6 rounded-xl border border-blue-200 bg-blue-50 p-4">
-          <div className="flex items-center gap-2">
-            <LocateFixed className="h-5 w-5 text-blue-700" />
-            <p className="text-sm font-semibold text-blue-900">
-              {locationStatus}
-            </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <LocateFixed className="h-5 w-5 shrink-0 text-blue-700" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-blue-900">
+                  {gpsIsStale
+                    ? 'GPS signal is stale — waiting for a fresh fix'
+                    : gpsStatus}
+                </p>
+                <p className="mt-0.5 text-xs text-blue-800">
+                  Location sharing: {locationStatus}
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setLastGpsUpdateAt(null);
+                setGpsAccuracy(null);
+                setSpeedMetersPerSecond(null);
+                setGpsStatus('Restarting GPS…');
+                setGpsWatchAttempt((attempt) => attempt + 1);
+              }}
+              disabled={!navigator.geolocation}
+            >
+              Retry GPS
+            </Button>
           </div>
 
           {myLocation && (
-            <p className="mt-2 text-xs text-blue-800">
-              Your coordinates: {myLocation.latitude.toFixed(5)},{' '}
-              {myLocation.longitude.toFixed(5)}
-            </p>
+            <div className="mt-2 space-y-1 text-xs text-blue-800">
+              <p>
+                Your coordinates: {myLocation.latitude.toFixed(5)},{' '}
+                {myLocation.longitude.toFixed(5)}
+              </p>
+              {gpsAccuracy !== null && (
+                <p>GPS accuracy: approximately ±{Math.round(gpsAccuracy)} metres</p>
+              )}
+              {lastGpsUpdateAt !== null && (
+                <p>Last GPS fix: {new Date(lastGpsUpdateAt).toLocaleTimeString()}</p>
+              )}
+            </div>
           )}
 
           {!activeRiderName && (
@@ -764,6 +1200,99 @@ return () => {
             your location with people you trust.
           </p>
         </div>
+
+        {/* Emergency SOS */}
+        <section className="mb-6 rounded-2xl border border-red-200 bg-white p-5 shadow-card" aria-labelledby="sos-heading">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-100 text-red-700">
+                <Siren className="h-6 w-6" />
+              </span>
+              <div>
+                <h2 id="sos-heading" className="text-base font-bold text-charcoal">Emergency SOS</h2>
+                <p className="mt-1 max-w-xl text-xs leading-relaxed text-charcoal-muted">
+                  Send your name and current GPS coordinates to everyone in this ride group. The organiser can acknowledge and resolve the alert.
+                </p>
+                <p className="mt-2 text-xs font-medium text-charcoal-muted">
+                  System notifications: {notificationPermission === 'granted' ? 'Enabled' : notificationPermission === 'denied' ? 'Blocked in browser settings' : 'Not enabled'}
+                </p>
+              </div>
+            </div>
+            {!isRideLeader && (
+              <Button
+                type="button"
+                onClick={sendSosAlert}
+                loading={sendingSos}
+                disabled={!activeMemberId || (room.status !== 'active' && room.status !== 'paused')}
+                className="bg-red-600 hover:bg-red-700 active:bg-red-800"
+              >
+                <Siren className="h-4 w-4" /> Send SOS
+              </Button>
+            )}
+            {isRideLeader && (
+              <Button
+                type="button"
+                onClick={sendSosAlert}
+                loading={sendingSos}
+                disabled={!activeMemberId || (room.status !== 'active' && room.status !== 'paused')}
+                className="bg-red-600 hover:bg-red-700 active:bg-red-800"
+              >
+                <Siren className="h-4 w-4" /> Send SOS
+              </Button>
+            )}
+            {notificationPermission !== 'denied' && (
+              <Button type="button" variant="secondary" onClick={enableSosNotifications}>
+                <Bell className="h-4 w-4" /> Enable background SOS alerts
+              </Button>
+            )}
+          </div>
+          {(room.status === 'waiting' || room.status === 'ended') && (
+            <p className="mt-3 text-xs text-charcoal-muted">SOS becomes available once the ride has started.</p>
+          )}
+          {!activeMemberId && (
+            <p className="mt-2 text-xs text-amber-700">Join this ride with a rider profile to send an SOS.</p>
+          )}
+          {sosError && <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{sosError}</p>}
+
+          <div className="mt-4 space-y-3">
+            {sosAlerts.length === 0 ? (
+              <p className="rounded-lg bg-gray-50 px-3 py-3 text-xs text-charcoal-muted">No SOS alerts for this ride.</p>
+            ) : sosAlerts.map((alertItem) => (
+              <article key={alertItem.id} className={`rounded-xl border p-4 ${alertItem.status === 'resolved' ? 'border-gray-200 bg-gray-50' : 'border-red-200 bg-red-50'}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-charcoal">{alertItem.rider_name} needs help</p>
+                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase ${alertItem.status === 'pending' ? 'bg-red-200 text-red-800' : alertItem.status === 'acknowledged' ? 'bg-amber-200 text-amber-900' : 'bg-gray-200 text-gray-700'}`}>
+                    {alertItem.status}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-charcoal-muted">{alertItem.message} · {new Date(alertItem.created_at).toLocaleString()}</p>
+                <a
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-ridesync-700 underline"
+                  href={`https://www.google.com/maps?q=${alertItem.latitude},${alertItem.longitude}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <MapPinned className="h-3.5 w-3.5" /> Open SOS location in Maps
+                </a>
+                {isRideLeader && alertItem.status !== 'resolved' && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {alertItem.status === 'pending' && (
+                      <Button size="sm" type="button" loading={updatingSosId === alertItem.id} disabled={updatingSosId !== null && updatingSosId !== alertItem.id} onClick={() => updateSosAlert(alertItem.id, 'acknowledged')}>
+                        <CheckCircle2 className="h-4 w-4" /> Acknowledge
+                      </Button>
+                    )}
+                    <Button size="sm" type="button" variant="secondary" loading={updatingSosId === alertItem.id} disabled={updatingSosId !== null && updatingSosId !== alertItem.id} onClick={() => updateSosAlert(alertItem.id, 'resolved')}>
+                      Resolve alert
+                    </Button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+          <p className="mt-3 text-[11px] leading-relaxed text-charcoal-muted">
+            RideSync SOS only alerts members currently in this room. It does not call emergency services or replace local emergency numbers.
+          </p>
+        </section>
 
         <div className="grid gap-5 lg:grid-cols-3">
           {/* Live map */}
@@ -794,9 +1323,14 @@ return () => {
                 </div>
               </div>
 
-              <div className="h-[380px] w-full">
+              <div className="relative h-[380px] w-full">
                 <RideLiveMap
-                  locations={locations}
+                  locations={locations.map((item) => ({
+                    ...item,
+                    is_leader: riders.some(
+                      (rider) => rider.id === item.member_id && rider.is_leader
+                    ),
+                  }))}
                   routeCoordinates={routeCoordinates}
                   destination={
                     room.destinationLat != null && room.destinationLng != null
@@ -804,6 +1338,43 @@ return () => {
                       : null
                   }
                 />
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Drag live speedometer to move it on the map"
+                  title="Drag to move speedometer"
+                  onPointerDown={(event) => {
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    speedometerDrag.current = {
+                      pointerX: event.clientX,
+                      pointerY: event.clientY,
+                      offsetX: speedometerOffset.x,
+                      offsetY: speedometerOffset.y,
+                    };
+                  }}
+                  onPointerMove={(event) => {
+                    const drag = speedometerDrag.current;
+                    if (!drag) return;
+                    const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+                    if (!bounds) return;
+                    const size = 68;
+                    const x = drag.offsetX + event.clientX - drag.pointerX;
+                    const y = drag.offsetY + event.clientY - drag.pointerY;
+                    setSpeedometerOffset({
+                      x: Math.max(0, Math.min(bounds.width - size - 16, x)),
+                      y: Math.max(0, Math.min(bounds.height - size - 16, y)),
+                    });
+                  }}
+                  onPointerUp={() => { speedometerDrag.current = null; }}
+                  onPointerCancel={() => { speedometerDrag.current = null; }}
+                  className="absolute left-4 top-4 z-[1000] flex h-[68px] w-[68px] cursor-grab touch-none select-none flex-col items-center justify-center rounded-full border-[3px] border-white bg-charcoal/90 text-white shadow-xl active:cursor-grabbing"
+                  style={{ transform: `translate(${speedometerOffset.x}px, ${speedometerOffset.y}px)` }}
+                >
+                  <span className="font-mono text-xl font-bold leading-none tabular-nums">
+                    {currentSpeed === null ? '—' : Math.round(currentSpeed)}
+                  </span>
+                  <span className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-white/80">{speedUnit}</span>
+                </div>
               </div>
 
               {routeStatus && (
@@ -932,6 +1503,11 @@ const isLive =
                         <p className="truncate text-sm font-semibold text-charcoal">
                           {rider.rider_name}
                         </p>
+                        {rider.is_leader && (
+                          <span className="mt-0.5 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                            Leader
+                          </span>
+                        )}
                         <p className="text-xs text-charcoal-muted">
                           
 {!riderLocation
@@ -968,6 +1544,15 @@ const isLive =
             )}
           </div>
         </div>
+
+        <RideGroupChat
+          roomId={room.id}
+          memberId={activeMemberId}
+          userId={currentUserId}
+          riderName={activeRiderName ?? null}
+          currentLocation={myLocation}
+          rideEnded={room.status === 'ended'}
+        />
 
         <div className="mt-6">
           <Link to="/dashboard">
