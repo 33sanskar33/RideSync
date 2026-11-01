@@ -1,0 +1,27 @@
+{
+  "id": "/",
+  "name": "RideSync — Group Riding Platform",
+  "short_name": "RideSync",
+  "description": "Stay together on every ride with live group location sharing, ride rooms and emergency alerts.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "categories": ["travel", "navigation"],
+  "icons": [
+    {
+      "src": "/ridesync-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/ridesync-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
