@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   CalendarPlus,
   KeyRound,
@@ -103,13 +104,14 @@ export default function DashboardPage() {
         <div className="mb-4 flex items-center gap-2">
           <CalendarDays className="h-5 w-5 text-charcoal-muted" aria-hidden="true" />
           <h2 className="text-lg font-semibold text-charcoal">Recent Rides</h2>
+          <Link to="/dashboard/history" className="ml-auto text-sm font-semibold text-ridesync-700 hover:underline">View all</Link>
         </div>
         <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-6 py-12 text-center">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100">
             <Compass className="h-7 w-7 text-gray-400" aria-hidden="true" />
           </div>
           <p className="text-sm font-medium text-charcoal-soft">
-            Your rides will appear here once you start riding with your group.
+            Your recent group rides will appear here. Open Ride History to see all your past rides.
           </p>
           <p className="mt-1 text-xs text-charcoal-muted">
             Create a ride or join one to get started.
