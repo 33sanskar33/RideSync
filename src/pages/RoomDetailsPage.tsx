@@ -566,8 +566,12 @@ useEffect(() => {
       if (pushError) {
         console.error('Background SOS push delivery failed:', pushError);
         alert('SOS saved in RideSync. Background push could not be delivered; online members will still see the alert.');
+      } else if (pushResult?.sent > 0 && pushResult?.failed > 0) {
+        alert(`SOS delivered to ${pushResult.sent} device(s); ${pushResult.failed} device(s) could not be reached. Online members will still see the alert.`);
       } else if (pushResult?.sent > 0) {
         alert(`SOS sent. Background notifications delivered to ${pushResult.sent} device(s).`);
+      } else if (pushResult?.failed > 0) {
+        alert(`SOS saved in RideSync, but push delivery failed for ${pushResult.failed} subscribed device(s). Check the Edge Function logs.`);
       } else {
         alert('SOS saved in RideSync. No other riders have enabled background notifications yet.');
       }
