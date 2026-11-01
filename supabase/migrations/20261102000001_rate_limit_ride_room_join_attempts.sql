@@ -18,7 +18,7 @@ CREATE OR REPLACE FUNCTION private.join_ride_room_by_code_impl(
 RETURNS TABLE (joined_room_id uuid)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path TO 'pg_catalog', 'public', 'auth'
+SET search_path TO 'pg_catalog'
 AS $function$
 DECLARE
   v_user_id uuid;
