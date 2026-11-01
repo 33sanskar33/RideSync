@@ -275,6 +275,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         {children}
       </main>
+      <footer className="mx-auto flex max-w-7xl flex-wrap justify-center gap-x-5 gap-y-2 px-4 pb-6 text-xs text-charcoal-muted sm:px-6 lg:px-8">
+        <Link to="/privacy" className="hover:text-ridesync-700 hover:underline">Privacy Policy</Link>
+        <Link to="/terms" className="hover:text-ridesync-700 hover:underline">Terms of Service</Link>
+      </footer>
     </div>
   );
 }
