@@ -474,11 +474,38 @@ useEffect(() => {
       }
       const registration = await navigator.serviceWorker.register('/sw.js');
       await navigator.serviceWorker.ready;
-      const existing = await registration.pushManager.getSubscription();
-      const subscription = existing ?? await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array('BNcwO6m4zhBMmcgHDTIMgwSdzxtCD-uKQw4EHn-6YTMvsahxZxGpU465_N0phndWJx6-s8N8nxGsVGEqwFlU048'),
-      });
+      const { data: vapidData, error: vapidError } = await supabase.functions.invoke('get-vapid-public-key');
+      if (vapidError) throw new Error(`Could not load push configuration: ${vapidError.message}`);
+      const vapidPublicKey = vapidData?.publicKey;
+      if (typeof vapidPublicKey !== 'string' || !vapidPublicKey) {
+        throw new Error('Push notifications are not configured on the server yet.');
+      }
+      const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
+      let subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        const existingKey = subscription.options.applicationServerKey;
+        const sameKey = Boolean(
+          existingKey &&
+          existingKey.byteLength === applicationServerKey.byteLength &&
+          new Uint8Array(existingKey).every((value, index) => value === applicationServerKey[index])
+        );
+        if (!sameKey) {
+          const oldEndpoint = subscription.endpoint;
+          await subscription.unsubscribe();
+          const { error: removeError } = await supabase
+            .from('ride_push_subscriptions')
+            .delete()
+            .eq('endpoint', oldEndpoint);
+          if (removeError) console.warn('Could not remove the previous push subscription:', removeError.message);
+          subscription = null;
+        }
+      }
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey,
+        });
+      }
       const subscriptionJson = subscription.toJSON();
       const keys = subscriptionJson.keys;
       if (!subscriptionJson.endpoint || !keys?.p256dh || !keys.auth) throw new Error('The browser did not return a complete push subscription.');
