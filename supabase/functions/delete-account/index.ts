@@ -22,8 +22,10 @@ Deno.serve(async (req) => {
     const authorization = req.headers.get("Authorization");
     if (!authorization) return json({ error: "Authentication required" }, 401);
 
-    const { confirmation } = await req.json();
-    if (confirmation !== "DELETE") return json({ error: "Explicit DELETE confirmation is required" }, 400);
+    const body = await req.json();
+    if (body?.confirmation !== "DELETE") {
+      return json({ error: "Explicit DELETE confirmation is required" }, 400);
+    }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const publishableKeys = Deno.env.get("SUPABASE_PUBLISHABLE_KEYS");
@@ -41,7 +43,9 @@ Deno.serve(async (req) => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
     const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) return json({ error: "Your session is invalid. Sign in again and retry." }, 401);
+    if (userError || !user) {
+      return json({ error: "Your session is invalid. Sign in again and retry." }, 401);
+    }
 
     const admin = createClient(supabaseUrl, secretKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -50,11 +54,17 @@ Deno.serve(async (req) => {
     // Preserve rooms created by this user, but close them and remove the creator identity.
     const { error: roomsError } = await admin
       .from("ride_rooms")
-      .update({ created_by: null, status: "ended", ended_at: new Date().toISOString(), active_since: null, paused_at: null })
+      .update({
+        created_by: null,
+        status: "ended",
+        ended_at: new Date().toISOString(),
+        active_since: null,
+        paused_at: null,
+      })
       .eq("created_by", user.id);
     if (roomsError) throw roomsError;
 
-    // These references otherwise prevent deletion when this user acknowledged another rider's SOS.
+    // Clear references from other riders' SOS alerts before deleting this account.
     const { error: acknowledgedError } = await admin
       .from("ride_sos_alerts")
       .update({ acknowledged_by: null })
@@ -67,6 +77,7 @@ Deno.serve(async (req) => {
       .eq("resolved_by", user.id);
     if (resolvedError) throw resolvedError;
 
+    // Auth deletion cascades this user's memberships, GPS rows, chat/SOS records and subscriptions.
     const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
     if (deleteError) throw deleteError;
 
