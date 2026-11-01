@@ -177,13 +177,15 @@ export default function SignupPage() {
           label={
             <>
               I acknowledge the RideSync Terms of Service and Privacy Policy.
-              (These documents will be published before launch.)
             </>
           }
           checked={terms}
           onChange={(e) => setTerms(e.target.checked)}
           error={errors.terms}
         />
+        <p className="pl-7 text-xs leading-relaxed text-charcoal-muted">
+          Please read the <Link to="/terms" className="font-semibold text-ridesync-700 hover:underline">Terms of Service</Link> and <Link to="/privacy" className="font-semibold text-ridesync-700 hover:underline">Privacy Policy</Link> before creating your account.
+        </p>
 
         <Button type="submit" size="lg" fullWidth loading={loading}>
           {loading ? 'Creating account…' : 'Create account'}
