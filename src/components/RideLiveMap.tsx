@@ -16,10 +16,12 @@ export interface RiderLocation {
   id: string;
   room_id?: string;
   user_id?: string | null;
+  member_id?: string | null;
   rider_name: string;
   latitude: number;
   longitude: number;
   updated_at: string;
+  is_leader?: boolean;
 }
 
 interface RideLiveMapProps {
@@ -132,6 +134,9 @@ function groupNearbyRiders(locations: RiderLocation[]): RiderGroup[] {
 
 function RiderClusterMarker({ group }: { group: RiderGroup }) {
   const radius = Math.min(22, 13 + Math.floor(group.riders.length / 2));
+  const allLocationsStale = group.riders.every(
+    (rider) => Date.now() - new Date(rider.updated_at).getTime() >= 30_000
+  );
 
   return (
     <CircleMarker
@@ -140,8 +145,8 @@ function RiderClusterMarker({ group }: { group: RiderGroup }) {
       pathOptions={{
         color: '#ffffff',
         weight: 3,
-        fillColor: '#1d4ed8',
-        fillOpacity: 0.95,
+        fillColor: allLocationsStale ? '#6b7280' : '#1d4ed8',
+        fillOpacity: allLocationsStale ? 0.5 : 0.95,
       }}
     >
       <Tooltip permanent direction="top" offset={[0, -radius]}>
@@ -157,9 +162,14 @@ function RiderClusterMarker({ group }: { group: RiderGroup }) {
           <div className="mt-2 space-y-1">
             {group.riders.map((rider) => (
               <div key={rider.id} className="flex items-center justify-between gap-4 text-sm">
-                <span className="font-medium">{rider.rider_name}</span>
+                <span className="font-medium">
+                  {rider.rider_name}
+                  {rider.is_leader && <strong className="ml-2 text-amber-700">Leader</strong>}
+                </span>
                 <span className="text-xs text-gray-500">
-                  {new Date(rider.updated_at).toLocaleTimeString()}
+                  {Date.now() - new Date(rider.updated_at).getTime() >= 30_000
+                    ? 'GPS stale'
+                    : new Date(rider.updated_at).toLocaleTimeString()}
                 </span>
               </div>
             ))}
@@ -214,9 +224,12 @@ function FitMapToRiders({
 
 function RiderMarker({ rider }: { rider: RiderLocation }) {
   const markerRef = useRef<LeafletCircleMarker | null>(null);
+  const isStale = Date.now() - new Date(rider.updated_at).getTime() >= 30_000;
   const color = useMemo(
-    () => getRiderColor(rider.rider_name),
-    [rider.rider_name]
+    () => isStale
+      ? '#6b7280'
+      : rider.is_leader ? '#d97706' : getRiderColor(rider.rider_name),
+    [rider.rider_name, rider.is_leader, isStale]
   );
 
   useEffect(() => {
@@ -261,14 +274,28 @@ function RiderMarker({ rider }: { rider: RiderLocation }) {
       center={[rider.latitude, rider.longitude]}
       radius={9}
       pathOptions={{
-        color: '#ffffff',
+        color: isStale ? '#9ca3af' : '#ffffff',
         weight: 2,
         fillColor: color,
-        fillOpacity: 1,
+        fillOpacity: isStale ? 0.45 : 1,
+        opacity: isStale ? 0.7 : 1,
+        dashArray: isStale ? '3 4' : undefined,
       }}
     >
+      {(rider.is_leader || isStale) && (
+        <Tooltip permanent direction="top" offset={[0, -10]}>
+          <span className={isStale ? 'font-bold text-gray-600' : 'font-bold text-amber-700'}>
+            {isStale ? 'GPS STALE' : 'Leader'}
+          </span>
+        </Tooltip>
+      )}
       <Popup>
         <strong>{rider.rider_name}</strong>
+        {rider.is_leader && <span className="ml-2 font-bold text-amber-700">Leader</span>}
+        <br />
+        <span className={isStale ? 'font-semibold text-gray-600' : 'text-green-700'}>
+          {isStale ? 'GPS STALE — showing last known location' : 'GPS recently updated'}
+        </span>
         <br />
         Last location update:{' '}
         {new Date(rider.updated_at).toLocaleTimeString()}
