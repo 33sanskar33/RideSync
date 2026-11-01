@@ -32,8 +32,8 @@ Deno.serve(async (req) => {
     const vapidPrivate = Deno.env.get("VAPID_PRIVATE_KEY");
     if (!vapidPublic || !vapidPrivate) throw new Error("VAPID keys are not configured");
     webpush.setVapidDetails("https://github.com/33sanskar33/RideSync", vapidPublic, vapidPrivate);
-    const origin = req.headers.get("origin") ?? "https://ridesync.app";
-    const payload = JSON.stringify({ title: `🚨 SOS: ${alert.rider_name} needs help`, body: alert.message || "Emergency assistance needed", url: `${origin}/room/${alert.room_id}`, tag: `ridesync-sos-${alert.id}`, latitude: alert.latitude, longitude: alert.longitude });
+    const appBaseUrl = "https://ride-sync-7lik.vercel.app";
+    const payload = JSON.stringify({ title: `🚨 SOS: ${alert.rider_name} needs help`, body: alert.message || "Emergency assistance needed", url: `${appBaseUrl}/room/${alert.room_id}`, tag: `ridesync-sos-${alert.id}`, latitude: alert.latitude, longitude: alert.longitude });
     const results = await Promise.allSettled(subscriptions.map(async (sub) => {
       try {
         await webpush.sendNotification(
