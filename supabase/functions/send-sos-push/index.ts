@@ -35,11 +35,26 @@ Deno.serve(async (req) => {
     const origin = req.headers.get("origin") ?? "https://ridesync.app";
     const payload = JSON.stringify({ title: `🚨 SOS: ${alert.rider_name} needs help`, body: alert.message || "Emergency assistance needed", url: `${origin}/room/${alert.room_id}`, tag: `ridesync-sos-${alert.id}`, latitude: alert.latitude, longitude: alert.longitude });
     const results = await Promise.allSettled(subscriptions.map(async (sub) => {
-      try { await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, { TTL: 3600, urgency: "high" }); }
-      catch (error) { const status = (error as { statusCode?: number }).statusCode; if (status === 404 || status === 410) await admin.from("ride_push_subscriptions").delete().eq("id", sub.id); throw error; }
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          payload,
+          { TTL: 3600, urgency: "high" },
+        );
+      } catch (error) {
+        const status = (error as { statusCode?: number }).statusCode;
+        const message = error instanceof Error ? error.message : "Unknown Web Push error";
+        console.error("Web Push delivery failed:", { status, message });
+        if (status === 404 || status === 410) {
+          await admin.from("ride_push_subscriptions").delete().eq("id", sub.id);
+        }
+        throw error;
+      }
     }));
     const sent = results.filter((result) => result.status === "fulfilled").length;
-    return Response.json({ sent, failed: results.length - sent }, { headers: cors });
+    const failed = results.length - sent;
+    console.info("SOS Web Push delivery summary:", { recipients: subscriptions.length, sent, failed });
+    return Response.json({ sent, failed }, { headers: cors });
   } catch (error) {
     console.error("send-sos-push failed:", error);
     return Response.json({ error: error instanceof Error ? error.message : "Push delivery failed" }, { status: 500, headers: cors });
