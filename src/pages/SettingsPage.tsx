@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Settings, Bell, MapPin, Moon, Globe, Gauge, Save } from 'lucide-react';
+import { Settings, MapPin, Moon, Globe, Gauge, Save } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
 import DeleteAccountSection from '@/components/DeleteAccountSection';
+import PushNotificationSettings from '@/components/PushNotificationSettings';
 import { supabase } from '@/lib/supabase';
 
 type DistanceUnit = 'km' | 'mi';
@@ -70,11 +71,6 @@ export default function SettingsPage() {
   }
 
   const futureSettings = [
-    {
-      icon: Bell,
-      title: 'Notifications',
-      description: 'Ride invites and departure reminders are not available yet.',
-    },
     {
       icon: MapPin,
       title: 'Location sharing',
@@ -175,6 +171,8 @@ export default function SettingsPage() {
             </Button>
           </section>
         </form>
+
+        <PushNotificationSettings />
 
         <section className="mt-5 space-y-3" aria-label="Other settings">
           <h2 className="px-1 text-sm font-semibold text-charcoal">Other preferences</h2>
