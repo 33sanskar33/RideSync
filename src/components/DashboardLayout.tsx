@@ -128,7 +128,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 to="/dashboard"
                 className={[
                   'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                  isActive('/dashboard') && !isActive('/dashboard/profile') && !isActive('/dashboard/settings')
+                  isActive('/dashboard') && !isActive('/dashboard/history') && !isActive('/dashboard/profile') && !isActive('/dashboard/settings')
                     ? 'bg-ridesync-50 text-ridesync-700'
                     : 'text-charcoal-muted hover:bg-gray-100 hover:text-charcoal-soft',
                 ].join(' ')}
