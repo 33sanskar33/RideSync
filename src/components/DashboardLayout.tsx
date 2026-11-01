@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, User, Settings, LogOut, Menu, X, ChartNoAxesCombined } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, Menu, X, BarChart3 } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import Logo from './Logo';
@@ -98,7 +98,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   const navLinks = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/dashboard/statistics', label: 'Statistics', icon: ChartNoAxesCombined },
+    { to: '/dashboard/statistics', label: 'Statistics', icon: BarChart3 },
     { to: '/dashboard/profile', label: 'Profile', icon: User },
     { to: '/dashboard/settings', label: 'Settings', icon: Settings },
   ];
@@ -135,7 +135,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                     : 'text-charcoal-muted hover:bg-gray-100 hover:text-charcoal-soft',
                 ].join(' ')}
               >
-                <ChartNoAxesCombined className="h-4 w-4" aria-hidden="true" />
+                <BarChart3 className="h-4 w-4" aria-hidden="true" />
                 Statistics
               </Link>
             </nav>
