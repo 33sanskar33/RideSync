@@ -77,13 +77,23 @@ export default function PrivacyPolicyPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-bold text-charcoal">7. Storage and retention</h2>
+        <h2 className="text-base font-bold text-charcoal">7. Storage, retention and account deletion</h2>
         <p>
-          RideSync stores account and ride information using its backend service provider. Information may
-          be retained while an account or ride feature is in use and for a reasonable period afterwards for
-          security, service operation, dispute handling or legal obligations. This draft does not promise a
-          specific deletion period. Account deletion and data-deletion request procedures must be published
-          before public launch.
+          RideSync stores account and ride information using its backend service provider. You can request
+          permanent account deletion from Settings. The deletion process removes your authentication account,
+          profile metadata, push subscriptions, personal GPS records, memberships and account-linked chat
+          and SOS records.
+        </p>
+        <p>
+          To avoid removing other riders' group history, rooms created by a deleted account are retained,
+          marked as ended and detached from the former creator. Other riders' memberships and their own
+          room-related records remain. A room may therefore continue to appear in other participants'
+          history after its creator deletes their account.
+        </p>
+        <p>
+          Information may be retained where reasonably necessary for security, service operation, dispute
+          handling or legal obligations. Account deletion cannot remove information that other participants
+          independently copied or that must be retained under applicable law.
         </p>
       </section>
 
