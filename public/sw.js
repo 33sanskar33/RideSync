@@ -82,7 +82,14 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || self.location.origin;
+  const requestedUrl = event.notification.data?.url || self.location.origin;
+  let targetUrl = self.location.origin;
+  try {
+    const parsedUrl = new URL(requestedUrl, self.location.origin);
+    if (parsedUrl.origin === self.location.origin) targetUrl = parsedUrl.href;
+  } catch {
+    // Ignore malformed notification URLs and keep the user on RideSync.
+  }
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of windows) {
