@@ -80,11 +80,17 @@ export default function TermsPage() {
       </section>
 
       <section>
-        <h2 className="text-base font-bold text-charcoal">8. Suspension and termination</h2>
+        <h2 className="text-base font-bold text-charcoal">8. Suspension, termination and account deletion</h2>
         <p>
           Access may be restricted or suspended where reasonably necessary to protect users, investigate
-          misuse, maintain security or comply with law. You may stop using RideSync at any time. The final
-          terms should explain the account-closure and data-deletion process before public launch.
+          misuse, maintain security or comply with law. You may stop using RideSync at any time and
+          permanently delete your account from Settings. Account deletion removes your account and
+          account-linked personal records as described in the Privacy Policy.
+        </p>
+        <p>
+          Ride rooms you created are retained for the other participants, marked as ended and detached from
+          your account. Other riders' memberships and their own room-related records remain. Account deletion
+          is permanent and cannot be undone.
         </p>
       </section>
 
