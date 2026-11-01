@@ -125,20 +125,6 @@ BEGIN
          AND rider_name = v_rider_name
          AND user_id IS NULL;
     ELSIF v_existing_user_id <> v_user_id THEN
-      INSERT INTO private.ride_room_join_attempts (user_id, window_started_at, failed_attempts)
-      VALUES (v_user_id, clock_timestamp(), 1)
-      ON CONFLICT (user_id) DO UPDATE
-      SET
-        window_started_at = CASE
-          WHEN private.ride_room_join_attempts.window_started_at <= clock_timestamp() - interval '15 minutes'
-            THEN clock_timestamp()
-          ELSE private.ride_room_join_attempts.window_started_at
-        END,
-        failed_attempts = CASE
-          WHEN private.ride_room_join_attempts.window_started_at <= clock_timestamp() - interval '15 minutes'
-            THEN 1
-          ELSE private.ride_room_join_attempts.failed_attempts + 1
-        END;
       RAISE EXCEPTION 'That rider name is already used in this room. Choose another name.';
     END IF;
   ELSE
