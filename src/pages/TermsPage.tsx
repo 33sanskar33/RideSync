@@ -2,12 +2,11 @@ import LegalPageLayout from '@/components/LegalPageLayout';
 
 export default function TermsPage() {
   return (
-    <LegalPageLayout title="Terms of Service" updatedAt="2 November 2026">
+    <LegalPageLayout title="Terms of Service" updatedAt="3 November 2026">
       <section>
         <h2 className="text-base font-bold text-charcoal">1. Agreement and eligibility</h2>
         <p>
-          These draft terms describe the rules for using RideSync. By creating an account or using the
-          service, you agree to follow the final terms once they are published. RideSync is intended for
+          These Terms of Service describe the rules for using RideSync. RideSync is independently operated by an individual developer/student and is not currently operated by a registered company. By creating an account or using the service, you agree to these terms. RideSync is intended for
           people legally permitted to participate in motorcycle rides. You are responsible for complying
           with age, licensing and other legal requirements that apply to you.
         </p>
@@ -99,18 +98,14 @@ export default function TermsPage() {
         <p>
           To the extent permitted by applicable law, RideSync is provided without guarantees that GPS,
           maps, routes, ride data, chat or notifications will always be accurate, available or timely.
-          Nothing in these draft terms excludes rights or liability that cannot legally be excluded. The
-          operator, limitation wording and any legally required consumer protections must be reviewed by
-          qualified counsel before these terms are finalised.
+          Nothing in these terms excludes rights or liability that cannot legally be excluded. These terms are intended to operate subject to applicable law, including any mandatory consumer protections. The wording of liability limitations should be reviewed by qualified counsel before a wider public launch.
         </p>
       </section>
 
       <section>
         <h2 className="text-base font-bold text-charcoal">10. Governing law and contact</h2>
         <p>
-          The governing law, dispute-resolution process, legal operator name and official contact details
-          must be completed after legal review and before public launch. These details are intentionally
-          not guessed in this draft.
+          For questions about these terms or the service, contact the individual operator at sanskarrevdekar11@gmail.com. This is the current contact address and may be updated in a later version. The governing law and dispute-resolution provisions should be confirmed through legal review before a wider public launch.
         </p>
       </section>
     </LegalPageLayout>

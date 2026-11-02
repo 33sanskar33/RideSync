@@ -2,11 +2,11 @@ import LegalPageLayout from '@/components/LegalPageLayout';
 
 export default function PrivacyPolicyPage() {
   return (
-    <LegalPageLayout title="Privacy Policy" updatedAt="2 November 2026">
+    <LegalPageLayout title="Privacy Policy" updatedAt="3 November 2026">
       <section>
         <h2 className="text-base font-bold text-charcoal">1. About this policy</h2>
         <p>
-          This draft explains how RideSync handles information when you create an account, join a ride room
+          This Privacy Policy explains how RideSync handles information when you create an account, join a ride room
           or use its group-riding features. RideSync is designed to help motorcycle groups coordinate with
           one another. It is not an emergency-response service.
         </p>
@@ -119,10 +119,7 @@ export default function PrivacyPolicyPage() {
       <section>
         <h2 className="text-base font-bold text-charcoal">10. Changes and contact</h2>
         <p>
-          This policy may be updated as RideSync changes. The final public policy must identify the service
-          operator and provide a monitored privacy contact address and any legally required grievance or
-          data-protection contact details. Those details have not yet been supplied in this draft and must
-          be added before public launch.
+          RideSync is independently operated by an individual developer/student and is not currently operated by a registered company. For privacy questions, access or deletion requests, or concerns about personal information, contact the operator at sanskarrevdekar11@gmail.com. This email address is the current contact and may be updated in a later version of this policy. Any additional grievance or data-protection contact details required by applicable law will be added following legal review.
         </p>
       </section>
     </LegalPageLayout>
