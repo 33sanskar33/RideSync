@@ -8,6 +8,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      remediate:
+        description: 'Run npm audit fix for semver-compatible lockfile updates only'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -68,3 +74,61 @@ jobs:
           path: npm-audit.json
           if-no-files-found: warn
           retention-days: 14
+
+  remediate-compatible-updates:
+    name: Prepare compatible dependency fixes
+    if: github.event_name == 'workflow_dispatch' && inputs.remediate == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Update only semver-compatible lockfile entries
+        run: npm audit fix --package-lock-only --ignore-scripts --no-fund
+
+      - name: Report remaining vulnerabilities
+        if: always()
+        run: |
+          npm audit --json > npm-audit-after-fix.json || true
+          node --input-type=commonjs <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('npm-audit-after-fix.json', 'utf8'));
+          console.log('Post-remediation vulnerability summary:');
+          console.log(JSON.stringify(report.metadata?.vulnerabilities ?? {}, null, 2));
+          for (const [name, item] of Object.entries(report.vulnerabilities ?? {})) {
+            console.log(`- ${name}: ${item.severity}; range=${item.range}; fix=${JSON.stringify(item.fixAvailable)}`);
+          }
+          NODE
+
+      - name: Upload post-remediation audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-after-fix
+          path: npm-audit-after-fix.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Commit lockfile changes to a review branch
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "No compatible lockfile changes were produced."
+            exit 0
+          fi
+          branch="security/npm-audit-fix-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add package-lock.json
+          git commit -m "chore(deps): apply compatible npm audit fixes"
+          git push origin "$branch"
