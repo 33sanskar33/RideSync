@@ -101,7 +101,21 @@ async function handleSubmit(e: FormEvent) {
     });
   } catch (err) {
     console.error('Join ride failed:', err);
-    setError('Could not join the ride. Please try again.');
+    const backendMessage =
+      err instanceof Error
+        ? err.message
+        : typeof err === 'object' &&
+            err !== null &&
+            'message' in err &&
+            typeof err.message === 'string'
+          ? err.message
+          : '';
+
+    if (backendMessage.includes('Too many incorrect room codes')) {
+      setError('Too many incorrect room codes. Please wait 15 minutes before trying again.');
+    } else {
+      setError('Could not join the ride. Please check the code and try again.');
+    }
   } finally {
     setLoading(false);
   }
