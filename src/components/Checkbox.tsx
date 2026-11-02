@@ -25,7 +25,7 @@ export default function Checkbox({
             id={fieldId}
             aria-invalid={!!error}
             aria-describedby={error ? errorId : undefined}
-            className="peer h-4.5 w-4.5 cursor-pointer appearance-none rounded border border-gray-300 bg-white transition-colors checked:border-ridesync-600 checked:bg-ridesync-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ridesync-500 focus-visible:ring-offset-1"
+            className={`peer h-4.5 w-4.5 cursor-pointer appearance-none rounded border border-gray-300 bg-white transition-colors checked:border-ridesync-600 checked:bg-ridesync-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ridesync-500 focus-visible:ring-offset-1 ${className}`.trim()}
             {...rest}
           />
           <Check

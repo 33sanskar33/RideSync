@@ -611,8 +611,9 @@ useEffect(() => {
 
   // 3. Save GPS for the exact rider profile selected in this tab.
   useEffect(() => {
+    const currentRoomId = room?.id;
     if (
-      !room?.id ||
+      !currentRoomId ||
       !activeRiderName ||
       !activeMemberId ||
       !myLocation ||
@@ -626,7 +627,7 @@ useEffect(() => {
         .from('ride_locations')
         .upsert(
           {
-            room_id: room!.id,
+            room_id: currentRoomId,
             member_id: activeMemberId,
             user_id: currentUserId,
             rider_name: activeRiderName!,
