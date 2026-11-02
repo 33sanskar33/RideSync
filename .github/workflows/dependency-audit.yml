@@ -68,7 +68,7 @@ jobs:
 
       - name: Upload full audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-audit-report
           path: npm-audit.json
@@ -112,7 +112,7 @@ jobs:
 
       - name: Upload post-remediation audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: npm-audit-after-fix
           path: npm-audit-after-fix.json
