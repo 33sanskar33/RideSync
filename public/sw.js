@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ridesync-shell-v1';
+const CACHE_NAME = 'ridesync-shell-v2';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/ridesync-icon.svg'];
 
 self.addEventListener('install', (event) => {
