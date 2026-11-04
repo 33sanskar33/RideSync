@@ -7,6 +7,7 @@ import {
   MapPin,
   Search,
   ArrowUpRight,
+  Download,
   Route,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -43,6 +44,48 @@ function formatDate(value: string) {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+function csvCell(value: string | number | null) {
+  const text = String(value ?? '');
+  // Prevent spreadsheet formula execution for untrusted ride names/destinations.
+  const safeText = /^[\t\r ]*[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${safeText.replace(/"/g, '""')}"`;
+}
+
+function exportRideHistory(rides: RideRecord[]) {
+  const headers = [
+    'Ride name',
+    'Destination',
+    'Room code',
+    'Status',
+    'Created at',
+    'Ended at',
+    'Duration (seconds)',
+    'Duration (formatted)',
+  ];
+  const rows = rides.map((ride) => [
+    ride.ride_name || 'Group ride',
+    ride.destination,
+    ride.room_code,
+    ride.status === 'ended' ? 'Completed' : ride.status,
+    ride.created_at,
+    ride.ended_at,
+    ride.elapsed_seconds,
+    ride.elapsed_seconds === null ? '' : formatDuration(ride.elapsed_seconds),
+  ]);
+  const csv = [headers, ...rows]
+    .map((row) => row.map((value) => csvCell(value)).join(','))
+    .join('\r\n');
+  const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `ridesync-ride-history-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 const statusStyles: Record<RideStatus, string> = {
@@ -196,9 +239,21 @@ export default function RideHistoryPage() {
               {loading ? 'Loading ride records…' : `${filteredRides.length} of ${rides.length} rides`}
             </p>
           </div>
-          <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-charcoal-muted">
-            Latest 200
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-charcoal-muted">
+              Latest 200
+            </span>
+            <button
+              type="button"
+              onClick={() => exportRideHistory(filteredRides)}
+              disabled={loading || filteredRides.length === 0}
+              title="Export the rides currently shown by your search and status filter"
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-charcoal-soft transition hover:border-ridesync-300 hover:bg-ridesync-50 hover:text-ridesync-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              Export CSV
+            </button>
+          </div>
         </div>
 
         {error ? (
