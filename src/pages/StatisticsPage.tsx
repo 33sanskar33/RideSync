@@ -6,12 +6,14 @@ import {
   Clock3,
   Route,
   TrendingUp,
+  Users,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
 import { supabase } from '@/lib/supabase';
 
 interface RideRecord {
   id: string;
+  created_by: string;
   ride_name: string | null;
   destination: string | null;
   created_at: string;
@@ -39,6 +41,7 @@ function formatDate(value: string) {
 
 export default function StatisticsPage() {
   const [rides, setRides] = useState<RideRecord[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,12 +60,42 @@ export default function StatisticsPage() {
         return;
       }
 
+      const currentUserId = authData.user.id;
+      setUserId(currentUserId);
+
+      const [createdResult, membershipResult] = await Promise.all([
+        supabase.from('ride_rooms').select('id').eq('created_by', currentUserId),
+        supabase.from('ride_members').select('room_id').eq('user_id', currentUserId),
+      ]);
+
+      if (!active) return;
+      if (createdResult.error || membershipResult.error) {
+        console.error(
+          'Load ride statistics references failed:',
+          createdResult.error?.message ?? membershipResult.error?.message
+        );
+        setError('Could not load your ride statistics. Please refresh and try again.');
+        setLoading(false);
+        return;
+      }
+
+      const roomIds = Array.from(new Set([
+        ...(createdResult.data ?? []).map((room) => room.id),
+        ...(membershipResult.data ?? []).map((membership) => membership.room_id),
+      ]));
+
+      if (roomIds.length === 0) {
+        setRides([]);
+        setLoading(false);
+        return;
+      }
+
       const { data, error: ridesError } = await supabase
         .from('ride_rooms')
-        .select('id, ride_name, destination, created_at, ended_at, elapsed_seconds, status')
-        .eq('created_by', authData.user.id)
+        .select('id, created_by, ride_name, destination, created_at, ended_at, elapsed_seconds, status')
+        .in('id', roomIds)
         .order('created_at', { ascending: false })
-        .limit(100);
+        .limit(200);
 
       if (!active) return;
       if (ridesError) {
@@ -88,40 +121,24 @@ export default function StatisticsPage() {
       (total, ride) => total + Math.max(0, ride.elapsed_seconds ?? 0),
       0
     );
+
     return {
-      created: rides.length,
+      total: rides.length,
+      created: rides.filter((ride) => ride.created_by === userId).length,
       completed: completed.length,
       totalSeconds,
       averageSeconds: completed.length ? totalSeconds / completed.length : 0,
-      active: rides.filter((ride) => ride.status === 'active' || ride.status === 'paused').length,
+      ongoing: rides.filter((ride) => ride.status === 'active' || ride.status === 'paused').length,
     };
-  }, [rides]);
+  }, [rides, userId]);
 
   const cards = [
-    {
-      label: 'Rides created',
-      value: stats.created.toString(),
-      detail: 'Your group rides',
-      icon: Route,
-    },
-    {
-      label: 'Completed rides',
-      value: stats.completed.toString(),
-      detail: 'Successfully ended',
-      icon: CheckCircle2,
-    },
-    {
-      label: 'Total riding time',
-      value: formatDuration(stats.totalSeconds),
-      detail: 'Across completed rides',
-      icon: Clock3,
-    },
-    {
-      label: 'Average duration',
-      value: stats.completed ? formatDuration(stats.averageSeconds) : '—',
-      detail: 'Per completed ride',
-      icon: TrendingUp,
-    },
+    { label: 'Total rides', value: stats.total.toString(), detail: 'Created or joined', icon: Route },
+    { label: 'Rides created', value: stats.created.toString(), detail: 'Started by your account', icon: Users },
+    { label: 'Completed rides', value: stats.completed.toString(), detail: 'Successfully ended', icon: CheckCircle2 },
+    { label: 'Ongoing rides', value: stats.ongoing.toString(), detail: 'Active or paused', icon: Activity },
+    { label: 'Total riding time', value: formatDuration(stats.totalSeconds), detail: 'Across completed rides', icon: Clock3 },
+    { label: 'Average duration', value: stats.completed ? formatDuration(stats.averageSeconds) : '—', detail: 'Per completed ride', icon: TrendingUp },
   ];
 
   return (
@@ -131,11 +148,9 @@ export default function StatisticsPage() {
           <Activity className="h-4 w-4" aria-hidden="true" />
           Your riding overview
         </div>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight text-charcoal sm:text-3xl">
-          Ride Statistics
-        </h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight text-charcoal sm:text-3xl">Ride Statistics</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-charcoal-muted sm:text-base">
-          Track the rides you have created, your completed trips, and time spent riding with your group.
+          See every ride you create or join, your completed trips, and time spent riding with your group.
         </p>
       </section>
 
@@ -145,7 +160,7 @@ export default function StatisticsPage() {
         </div>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Ride statistics">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-label="Ride statistics">
         {cards.map((card) => {
           const Icon = card.icon;
           return (
@@ -156,9 +171,7 @@ export default function StatisticsPage() {
                   <Icon className="h-5 w-5" aria-hidden="true" />
                 </span>
               </div>
-              <p className="mt-5 text-2xl font-bold tracking-tight text-charcoal">
-                {loading ? '—' : card.value}
-              </p>
+              <p className="mt-5 text-2xl font-bold tracking-tight text-charcoal">{loading ? '—' : card.value}</p>
               <p className="mt-1 text-xs text-charcoal-muted">{card.detail}</p>
             </article>
           );
@@ -169,7 +182,7 @@ export default function StatisticsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4 sm:px-6">
           <div>
             <h2 className="text-lg font-semibold text-charcoal">Your recent rides</h2>
-            <p className="mt-1 text-xs text-charcoal-muted">Latest rides created from this account</p>
+            <p className="mt-1 text-xs text-charcoal-muted">Latest rides you created or joined</p>
           </div>
           <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-charcoal-muted">
             {loading ? 'Loading…' : `${rides.length} rides`}
@@ -184,7 +197,7 @@ export default function StatisticsPage() {
               <CalendarClock className="h-6 w-6" aria-hidden="true" />
             </div>
             <p className="mt-4 text-sm font-semibold text-charcoal">No rides yet</p>
-            <p className="mt-1 text-sm text-charcoal-muted">Create your first ride and your stats will show up here.</p>
+            <p className="mt-1 text-sm text-charcoal-muted">Create your first ride or join a group to see your stats here.</p>
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
@@ -194,6 +207,9 @@ export default function StatisticsPage() {
                   <p className="truncate text-sm font-semibold text-charcoal">{ride.ride_name || 'Group ride'}</p>
                   <p className="mt-1 truncate text-xs text-charcoal-muted">
                     {ride.destination ? `To ${ride.destination} · ` : ''}{formatDate(ride.created_at)}
+                  </p>
+                  <p className="mt-1 text-[11px] font-medium text-charcoal-muted">
+                    {ride.created_by === userId ? 'Created by you' : 'Joined ride'}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -219,7 +235,7 @@ export default function StatisticsPage() {
       </section>
 
       <p className="mt-4 text-xs leading-relaxed text-charcoal-muted">
-        Statistics currently include rides created by your account. Distance tracking will be added only after RideSync can store verified trip-distance data.
+        Statistics include rides created or joined by your account. Distance is not displayed because RideSync does not yet store verified trip-distance totals.
       </p>
     </DashboardLayout>
   );
