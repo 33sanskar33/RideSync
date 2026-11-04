@@ -875,7 +875,7 @@ return () => {
     async function loadLocations() {
       const { data, error } = await supabase
         .from('ride_locations')
-        .select('id, room_id, member_id, user_id, rider_name, latitude, longitude, updated_at')
+        .select('id, room_id, member_id, user_id, rider_name, latitude, longitude, updated_at, distance_meters')
         .eq('room_id', roomId);
 
       if (error) {
@@ -961,6 +961,8 @@ return () => {
     speedMetersPerSecond === null || gpsIsStale
       ? null
       : speedMetersPerSecond * (distanceUnit === 'mi' ? 2.236936 : 3.6);
+  const currentRiderDistanceMeters =
+    locations.find((item) => item.member_id === activeMemberId)?.distance_meters ?? 0;
 
   const formatElapsedTime = (totalSeconds: number) => {
     const safeSeconds = Math.max(0, Math.floor(totalSeconds));
@@ -1133,6 +1135,15 @@ return () => {
                   {room.code}
                 </code>
                 <CopyCodeButton code={room.code} size="sm" />
+              </div>
+              <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-4">
+                <MapPinned className="h-5 w-5 text-ridesync-700" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-semibold text-charcoal">Your tracked distance</p>
+                  <p className="text-xs text-charcoal-muted">
+                    {formatRouteDistance(currentRiderDistanceMeters)} · GPS estimate
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -1407,7 +1418,7 @@ return () => {
               </div>
             )}
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-4">
                 <LocateFixed className="h-5 w-5 text-ridesync-700" />
                 <div>

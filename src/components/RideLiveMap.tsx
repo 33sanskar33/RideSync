@@ -21,6 +21,7 @@ export interface RiderLocation {
   latitude: number;
   longitude: number;
   updated_at: string;
+  distance_meters?: number;
   is_leader?: boolean;
 }
 
@@ -52,6 +53,11 @@ function getRiderColor(riderName: string) {
 }
 
 const RIDER_COLOCATION_RADIUS_METERS = 20;
+
+function formatTrackedDistance(meters: number) {
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1)} km`;
+}
 
 interface RiderGroup {
   key: string;
@@ -162,11 +168,16 @@ function RiderClusterMarker({ group }: { group: RiderGroup }) {
           <div className="mt-2 space-y-1">
             {group.riders.map((rider) => (
               <div key={rider.id} className="flex items-center justify-between gap-4 text-sm">
-                <span className="font-medium">
-                  {rider.rider_name}
-                  {rider.is_leader && <strong className="ml-2 text-amber-700">Leader</strong>}
+                <span className="min-w-0">
+                  <span className="block font-medium">
+                    {rider.rider_name}
+                    {rider.is_leader && <strong className="ml-2 text-amber-700">Leader</strong>}
+                  </span>
+                  <span className="block text-[11px] text-gray-500">
+                    Tracked: {formatTrackedDistance(rider.distance_meters ?? 0)}
+                  </span>
                 </span>
-                <span className="text-xs text-gray-500">
+                <span className="shrink-0 text-xs text-gray-500">
                   {Date.now() - new Date(rider.updated_at).getTime() >= 30_000
                     ? 'GPS stale'
                     : new Date(rider.updated_at).toLocaleTimeString()}

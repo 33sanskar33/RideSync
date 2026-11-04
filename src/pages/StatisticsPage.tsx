@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CheckCircle2,
   Clock3,
+  MapPinned,
   Route,
   TrendingUp,
   Users,
@@ -39,9 +40,15 @@ function formatDate(value: string) {
   });
 }
 
+function formatDistance(meters: number) {
+  if (meters < 1000) return `${Math.round(meters)} m`;
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
 export default function StatisticsPage() {
   const [rides, setRides] = useState<RideRecord[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
+  const [totalDistanceMeters, setTotalDistanceMeters] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,26 +93,44 @@ export default function StatisticsPage() {
 
       if (roomIds.length === 0) {
         setRides([]);
+        setTotalDistanceMeters(0);
         setLoading(false);
         return;
       }
 
-      const { data, error: ridesError } = await supabase
-        .from('ride_rooms')
-        .select('id, created_by, ride_name, destination, created_at, ended_at, elapsed_seconds, status')
-        .in('id', roomIds)
-        .order('created_at', { ascending: false })
-        .limit(200);
+      const [ridesResult, distanceResult] = await Promise.all([
+        supabase
+          .from('ride_rooms')
+          .select('id, created_by, ride_name, destination, created_at, ended_at, elapsed_seconds, status')
+          .in('id', roomIds)
+          .order('created_at', { ascending: false })
+          .limit(200),
+        supabase
+          .from('ride_locations')
+          .select('distance_meters')
+          .eq('user_id', currentUserId),
+      ]);
 
       if (!active) return;
-      if (ridesError) {
-        console.error('Load ride statistics failed:', ridesError.message);
+      if (ridesResult.error) {
+        console.error('Load ride statistics failed:', ridesResult.error.message);
         setError('Could not load your ride statistics. Please refresh and try again.');
         setLoading(false);
         return;
       }
 
-      setRides((data ?? []) as RideRecord[]);
+      setRides((ridesResult.data ?? []) as RideRecord[]);
+      if (distanceResult.error) {
+        console.warn('Load GPS distance statistics failed:', distanceResult.error.message);
+        setTotalDistanceMeters(null);
+      } else {
+        setTotalDistanceMeters(
+          (distanceResult.data ?? []).reduce(
+            (total, location) => total + Math.max(0, location.distance_meters ?? 0),
+            0
+          )
+        );
+      }
       setLoading(false);
     }
 
@@ -138,6 +163,7 @@ export default function StatisticsPage() {
     { label: 'Completed rides', value: stats.completed.toString(), detail: 'Successfully ended', icon: CheckCircle2 },
     { label: 'Ongoing rides', value: stats.ongoing.toString(), detail: 'Active or paused', icon: Activity },
     { label: 'Total riding time', value: formatDuration(stats.totalSeconds), detail: 'Across completed rides', icon: Clock3 },
+    { label: 'GPS-tracked distance', value: totalDistanceMeters === null ? '—' : formatDistance(totalDistanceMeters), detail: 'Across your joined rides', icon: MapPinned },
     { label: 'Average duration', value: stats.completed ? formatDuration(stats.averageSeconds) : '—', detail: 'Per completed ride', icon: TrendingUp },
   ];
 
@@ -235,7 +261,7 @@ export default function StatisticsPage() {
       </section>
 
       <p className="mt-4 text-xs leading-relaxed text-charcoal-muted">
-        Statistics include rides created or joined by your account. Distance is not displayed because RideSync does not yet store verified trip-distance totals.
+        Statistics include rides created or joined by your account. GPS distance is accumulated only while a ride is active; short GPS drift and implausible jumps are filtered. Historical rides start at zero because their past GPS samples were not stored.
       </p>
     </DashboardLayout>
   );
