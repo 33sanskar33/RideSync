@@ -10,6 +10,7 @@ import {
   Users,
 } from 'lucide-react';
 import DashboardLayout from '@/components/DashboardLayout';
+import { formatDistanceMeters, type DistanceUnit } from '@/lib/distance';
 import { supabase } from '@/lib/supabase';
 
 interface RideRecord {
@@ -40,14 +41,10 @@ function formatDate(value: string) {
   });
 }
 
-function formatDistance(meters: number) {
-  if (meters < 1000) return `${Math.round(meters)} m`;
-  return `${(meters / 1000).toFixed(1)} km`;
-}
-
 export default function StatisticsPage() {
   const [rides, setRides] = useState<RideRecord[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
+  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('km');
   const [totalDistanceMeters, setTotalDistanceMeters] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +66,10 @@ export default function StatisticsPage() {
 
       const currentUserId = authData.user.id;
       setUserId(currentUserId);
+      const savedDistanceUnit = authData.user.user_metadata?.distance_unit;
+      if (savedDistanceUnit === 'km' || savedDistanceUnit === 'mi') {
+        setDistanceUnit(savedDistanceUnit);
+      }
 
       const [createdResult, membershipResult] = await Promise.all([
         supabase.from('ride_rooms').select('id').eq('created_by', currentUserId),
@@ -163,7 +164,7 @@ export default function StatisticsPage() {
     { label: 'Completed rides', value: stats.completed.toString(), detail: 'Successfully ended', icon: CheckCircle2 },
     { label: 'Ongoing rides', value: stats.ongoing.toString(), detail: 'Active or paused', icon: Activity },
     { label: 'Total riding time', value: formatDuration(stats.totalSeconds), detail: 'Across completed rides', icon: Clock3 },
-    { label: 'GPS-tracked distance', value: totalDistanceMeters === null ? '—' : formatDistance(totalDistanceMeters), detail: 'Across your joined rides', icon: MapPinned },
+    { label: 'GPS-tracked distance', value: totalDistanceMeters === null ? '—' : formatDistanceMeters(totalDistanceMeters, distanceUnit), detail: 'Across your joined rides', icon: MapPinned },
     { label: 'Average duration', value: stats.completed ? formatDuration(stats.averageSeconds) : '—', detail: 'Per completed ride', icon: TrendingUp },
   ];
 

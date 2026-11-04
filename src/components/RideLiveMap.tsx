@@ -10,6 +10,7 @@ import {
   useMap,
 } from 'react-leaflet';
 import type { CircleMarker as LeafletCircleMarker } from 'leaflet';
+import { formatDistanceMeters, type DistanceUnit } from '@/lib/distance';
 import 'leaflet/dist/leaflet.css';
 
 export interface RiderLocation {
@@ -27,6 +28,7 @@ export interface RiderLocation {
 
 interface RideLiveMapProps {
   locations: RiderLocation[];
+  distanceUnit?: DistanceUnit;
   routeCoordinates?: [number, number][];
   destination?: { latitude: number; longitude: number } | null;
 }
@@ -53,11 +55,6 @@ function getRiderColor(riderName: string) {
 }
 
 const RIDER_COLOCATION_RADIUS_METERS = 20;
-
-function formatTrackedDistance(meters: number) {
-  if (meters < 1000) return `${Math.round(meters)} m`;
-  return `${(meters / 1000).toFixed(1)} km`;
-}
 
 interface RiderGroup {
   key: string;
@@ -138,7 +135,13 @@ function groupNearbyRiders(locations: RiderLocation[]): RiderGroup[] {
   }));
 }
 
-function RiderClusterMarker({ group }: { group: RiderGroup }) {
+function RiderClusterMarker({
+  group,
+  distanceUnit,
+}: {
+  group: RiderGroup;
+  distanceUnit: DistanceUnit;
+}) {
   const radius = Math.min(22, 13 + Math.floor(group.riders.length / 2));
   const allLocationsStale = group.riders.every(
     (rider) => Date.now() - new Date(rider.updated_at).getTime() >= 30_000
@@ -174,7 +177,7 @@ function RiderClusterMarker({ group }: { group: RiderGroup }) {
                     {rider.is_leader && <strong className="ml-2 text-amber-700">Leader</strong>}
                   </span>
                   <span className="block text-[11px] text-gray-500">
-                    Tracked: {formatTrackedDistance(rider.distance_meters ?? 0)}
+                    Tracked: {formatDistanceMeters(rider.distance_meters ?? 0, distanceUnit)}
                   </span>
                 </span>
                 <span className="shrink-0 text-xs text-gray-500">
@@ -233,7 +236,13 @@ function FitMapToRiders({
   return null;
 }
 
-function RiderMarker({ rider }: { rider: RiderLocation }) {
+function RiderMarker({
+  rider,
+  distanceUnit,
+}: {
+  rider: RiderLocation;
+  distanceUnit: DistanceUnit;
+}) {
   const markerRef = useRef<LeafletCircleMarker | null>(null);
   const isStale = Date.now() - new Date(rider.updated_at).getTime() >= 30_000;
   const color = useMemo(
@@ -310,6 +319,8 @@ function RiderMarker({ rider }: { rider: RiderLocation }) {
         <br />
         Last location update:{' '}
         {new Date(rider.updated_at).toLocaleTimeString()}
+        <br />
+        Tracked: {formatDistanceMeters(rider.distance_meters ?? 0, distanceUnit)}
       </Popup>
     </CircleMarker>
   );
@@ -317,6 +328,7 @@ function RiderMarker({ rider }: { rider: RiderLocation }) {
 
 export default function RideLiveMap({
   locations,
+  distanceUnit = 'km',
   routeCoordinates = [],
   destination = null,
 }: RideLiveMapProps) {
@@ -355,9 +367,9 @@ export default function RideLiveMap({
 
       {groupNearbyRiders(locations).map((group) =>
         group.riders.length === 1 ? (
-          <RiderMarker key={group.riders[0].id} rider={group.riders[0]} />
+          <RiderMarker key={group.riders[0].id} rider={group.riders[0]} distanceUnit={distanceUnit} />
         ) : (
-          <RiderClusterMarker key={group.key} group={group} />
+          <RiderClusterMarker key={group.key} group={group} distanceUnit={distanceUnit} />
         )
       )}
     </MapContainer>

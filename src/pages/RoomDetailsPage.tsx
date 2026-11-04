@@ -21,6 +21,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
 import CopyCodeButton from '@/components/CopyCodeButton';
 import RideGroupChat from '@/components/RideGroupChat';
+import { formatDistanceMeters } from '@/lib/distance';
 
 interface RideRoom {
   id: string;
@@ -975,9 +976,7 @@ return () => {
   };
 
   const formatRouteDistance = (meters: number) =>
-    distanceUnit === 'mi'
-      ? `${(meters / 1609.344).toFixed(1)} mi`
-      : `${(meters / 1000).toFixed(1)} km`;
+    formatDistanceMeters(meters, distanceUnit);
 
   const formatRouteDuration = (seconds: number) => {
     const totalMinutes = Math.max(1, Math.round(seconds / 60));
@@ -1337,6 +1336,7 @@ return () => {
 
               <div className="relative h-[380px] w-full">
                 <RideLiveMap
+                  distanceUnit={distanceUnit}
                   locations={locations.map((item) => ({
                     ...item,
                     is_leader: riders.some(
