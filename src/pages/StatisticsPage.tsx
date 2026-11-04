@@ -41,6 +41,7 @@ function formatDate(value: string) {
 
 export default function StatisticsPage() {
   const [rides, setRides] = useState<RideRecord[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,16 +60,12 @@ export default function StatisticsPage() {
         return;
       }
 
-      const userId = authData.user.id;
+      const currentUserId = authData.user.id;
+      setUserId(currentUserId);
+
       const [createdResult, membershipResult] = await Promise.all([
-        supabase
-          .from('ride_rooms')
-          .select('id')
-          .eq('created_by', userId),
-        supabase
-          .from('ride_members')
-          .select('room_id')
-          .eq('user_id', userId),
+        supabase.from('ride_rooms').select('id').eq('created_by', currentUserId),
+        supabase.from('ride_members').select('room_id').eq('user_id', currentUserId),
       ]);
 
       if (!active) return;
@@ -127,51 +124,21 @@ export default function StatisticsPage() {
 
     return {
       total: rides.length,
-      created: rides.filter((ride) => ride.created_by === rides[0]?.created_by).length,
+      created: rides.filter((ride) => ride.created_by === userId).length,
       completed: completed.length,
       totalSeconds,
       averageSeconds: completed.length ? totalSeconds / completed.length : 0,
       ongoing: rides.filter((ride) => ride.status === 'active' || ride.status === 'paused').length,
     };
-  }, [rides]);
+  }, [rides, userId]);
 
   const cards = [
-    {
-      label: 'Total rides',
-      value: stats.total.toString(),
-      detail: 'Created or joined',
-      icon: Route,
-    },
-    {
-      label: 'Rides created',
-      value: stats.created.toString(),
-      detail: 'Started by your account',
-      icon: Users,
-    },
-    {
-      label: 'Completed rides',
-      value: stats.completed.toString(),
-      detail: 'Successfully ended',
-      icon: CheckCircle2,
-    },
-    {
-      label: 'Ongoing rides',
-      value: stats.ongoing.toString(),
-      detail: 'Active or paused',
-      icon: Activity,
-    },
-    {
-      label: 'Total riding time',
-      value: formatDuration(stats.totalSeconds),
-      detail: 'Across completed rides',
-      icon: Clock3,
-    },
-    {
-      label: 'Average duration',
-      value: stats.completed ? formatDuration(stats.averageSeconds) : '—',
-      detail: 'Per completed ride',
-      icon: TrendingUp,
-    },
+    { label: 'Total rides', value: stats.total.toString(), detail: 'Created or joined', icon: Route },
+    { label: 'Rides created', value: stats.created.toString(), detail: 'Started by your account', icon: Users },
+    { label: 'Completed rides', value: stats.completed.toString(), detail: 'Successfully ended', icon: CheckCircle2 },
+    { label: 'Ongoing rides', value: stats.ongoing.toString(), detail: 'Active or paused', icon: Activity },
+    { label: 'Total riding time', value: formatDuration(stats.totalSeconds), detail: 'Across completed rides', icon: Clock3 },
+    { label: 'Average duration', value: stats.completed ? formatDuration(stats.averageSeconds) : '—', detail: 'Per completed ride', icon: TrendingUp },
   ];
 
   return (
@@ -181,9 +148,7 @@ export default function StatisticsPage() {
           <Activity className="h-4 w-4" aria-hidden="true" />
           Your riding overview
         </div>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight text-charcoal sm:text-3xl">
-          Ride Statistics
-        </h1>
+        <h1 className="mt-2 text-2xl font-bold tracking-tight text-charcoal sm:text-3xl">Ride Statistics</h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-charcoal-muted sm:text-base">
           See every ride you create or join, your completed trips, and time spent riding with your group.
         </p>
@@ -206,9 +171,7 @@ export default function StatisticsPage() {
                   <Icon className="h-5 w-5" aria-hidden="true" />
                 </span>
               </div>
-              <p className="mt-5 text-2xl font-bold tracking-tight text-charcoal">
-                {loading ? '—' : card.value}
-              </p>
+              <p className="mt-5 text-2xl font-bold tracking-tight text-charcoal">{loading ? '—' : card.value}</p>
               <p className="mt-1 text-xs text-charcoal-muted">{card.detail}</p>
             </article>
           );
@@ -246,7 +209,7 @@ export default function StatisticsPage() {
                     {ride.destination ? `To ${ride.destination} · ` : ''}{formatDate(ride.created_at)}
                   </p>
                   <p className="mt-1 text-[11px] font-medium text-charcoal-muted">
-                    {ride.created_by === rides[0]?.created_by ? 'Created by you' : 'Joined ride'}
+                    {ride.created_by === userId ? 'Created by you' : 'Joined ride'}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
