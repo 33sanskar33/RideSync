@@ -21,6 +21,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import Button from '@/components/Button';
 import CopyCodeButton from '@/components/CopyCodeButton';
 import RideGroupChat from '@/components/RideGroupChat';
+import RoomCompletionSummary from '@/components/RoomCompletionSummary';
 import { formatDistanceMeters } from '@/lib/distance';
 
 interface RideRoom {
@@ -1211,6 +1212,18 @@ return () => {
             your location with people you trust.
           </p>
         </div>
+
+        {room.status === 'ended' && (
+          <RoomCompletionSummary
+            rideName={room.name}
+            destination={room.destination}
+            endedAt={room.endedAt}
+            durationSeconds={room.elapsedSeconds}
+            riders={riders}
+            locations={locations}
+            distanceUnit={distanceUnit}
+          />
+        )}
 
         {/* Emergency SOS */}
         <section className="mb-6 rounded-2xl border border-red-200 bg-white p-5 shadow-card" aria-labelledby="sos-heading">
