@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { AlertCircle, Check, Copy } from 'lucide-react';
 
 interface CopyCodeButtonProps {
   code: string;
@@ -7,12 +7,14 @@ interface CopyCodeButtonProps {
   size?: 'sm' | 'md';
 }
 
+type CopyStatus = 'copied' | 'failed' | null;
+
 export default function CopyCodeButton({
   code,
   className = '',
   size = 'md',
 }: CopyCodeButtonProps) {
-  const [copied, setCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<CopyStatus>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
@@ -22,26 +24,39 @@ export default function CopyCodeButton({
   }, []);
 
   async function handleCopy() {
+    let success = false;
+
     try {
-      await navigator.clipboard.writeText(code);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+        success = true;
+      }
     } catch {
-      // Fallback for restricted clipboard environments
+      // Try the legacy fallback below when clipboard permissions are denied.
+    }
+
+    if (!success) {
       const textarea = document.createElement('textarea');
       textarea.value = code;
+      textarea.setAttribute('readonly', '');
       textarea.style.position = 'fixed';
       textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
       document.body.appendChild(textarea);
       textarea.select();
+
       try {
-        document.execCommand('copy');
+        success = document.execCommand('copy');
       } catch {
-        // Clipboard not available — silent fail, user can read the code
+        success = false;
+      } finally {
+        document.body.removeChild(textarea);
       }
-      document.body.removeChild(textarea);
     }
-    setCopied(true);
+
+    setCopyStatus(success ? 'copied' : 'failed');
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setCopied(false), 2000);
+    timerRef.current = setTimeout(() => setCopyStatus(null), 2500);
   }
 
   const sizeClasses =
@@ -54,18 +69,32 @@ export default function CopyCodeButton({
       className={[
         'inline-flex items-center justify-center rounded-lg border font-semibold transition-all duration-150',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ridesync-500 focus-visible:ring-offset-2',
-        copied
+        copyStatus === 'copied'
           ? 'border-ridesync-300 bg-ridesync-50 text-ridesync-700'
-          : 'border-gray-300 bg-white text-charcoal-soft hover:bg-gray-50',
+          : copyStatus === 'failed'
+            ? 'border-red-200 bg-red-50 text-red-700'
+            : 'border-gray-300 bg-white text-charcoal-soft hover:bg-gray-50',
         sizeClasses,
         className,
       ].join(' ')}
-      aria-label={`Copy room code ${code}`}
+      aria-label={
+        copyStatus === 'copied'
+          ? 'Room code copied'
+          : copyStatus === 'failed'
+            ? 'Could not copy room code'
+            : `Copy room code ${code}`
+      }
+      aria-live="polite"
     >
-      {copied ? (
+      {copyStatus === 'copied' ? (
         <>
           <Check className="h-3.5 w-3.5" aria-hidden="true" />
           Copied
+        </>
+      ) : copyStatus === 'failed' ? (
+        <>
+          <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
+          Copy failed
         </>
       ) : (
         <>
