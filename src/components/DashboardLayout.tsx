@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, User, Settings, LogOut, Menu, X, BarChart3, History } from 'lucide-react';
+import { LayoutDashboard, User, Settings, LogOut, Menu, X, BarChart3, History, WifiOff } from 'lucide-react';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import Logo from './Logo';
@@ -16,6 +16,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const profileRef = useRef<HTMLDivElement>(null);
 
   // Close profile dropdown on outside click
@@ -30,6 +31,21 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  // Keep a visible warning when the browser loses its network connection.
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    setIsOnline(navigator.onLine);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   // Close mobile nav on route change
@@ -270,6 +286,22 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </div>
         )}
       </header>
+
+      {!isOnline && (
+        <div
+          className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-amber-900"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="mx-auto flex max-w-7xl items-center gap-2 text-sm sm:px-2">
+            <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <p>
+              <span className="font-semibold">You’re offline.</span>{' '}
+              Live location, chat and ride updates may be delayed until your connection returns.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Main content */}
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
