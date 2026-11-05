@@ -7,7 +7,7 @@ interface SummaryRider {
 }
 
 interface SummaryLocation {
-  member_id: string | null;
+  member_id?: string | null;
   distance_meters?: number | null;
 }
 
