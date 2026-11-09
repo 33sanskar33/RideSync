@@ -30,6 +30,7 @@ type GoogleMapsApi = {
   Point: new (x: number, y: number) => any;
   SymbolPath: { CIRCLE: unknown };
   Animation?: { DROP: unknown };
+  event: { addListenerOnce: (instance: any, eventName: string, handler: () => void) => unknown };
 };
 
 type GoogleMapsWindow = Window & {
@@ -238,7 +239,6 @@ export default function RideLiveMap({
         fullscreenControl: true,
         clickableIcons: false,
         gestureHandling: 'greedy',
-        mapId: 'RIDESYNC_LIVE_MAP',
       });
       infoWindowRef.current = new maps.InfoWindow();
       setMapReady(true);
