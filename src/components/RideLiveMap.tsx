@@ -31,6 +31,7 @@ type GoogleMapsApi = {
   SymbolPath: { CIRCLE: unknown };
   Animation?: { DROP: unknown };
   event: { addListenerOnce: (instance: any, eventName: string, handler: () => void) => unknown };
+  importLibrary: (name: 'maps') => Promise<Record<string, any>>;
 };
 
 type GoogleMapsWindow = Window & {
@@ -43,6 +44,15 @@ const RIDER_COLORS = [
 ];
 const RIDER_COLOCATION_RADIUS_METERS = 20;
 let mapsApiPromise: Promise<GoogleMapsApi> | null = null;
+
+async function getMapsApi(): Promise<GoogleMapsApi> {
+  const maps = (window as GoogleMapsWindow).google?.maps;
+  if (!maps) throw new Error('Google Maps loaded without its Maps JavaScript library.');
+  // Resolve the Maps JavaScript library explicitly instead of relying on the
+  // legacy global Map constructor, which can be unavailable during async load.
+  const library = await maps.importLibrary('maps');
+  return { ...maps, ...library } as GoogleMapsApi;
+}
 
 function loadGoogleMaps(): Promise<GoogleMapsApi> {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim();
@@ -58,9 +68,7 @@ function loadGoogleMaps(): Promise<GoogleMapsApi> {
     const existingScript = document.querySelector<HTMLScriptElement>('#ridesync-google-maps');
     if (existingScript) {
       existingScript.addEventListener('load', () => {
-        const maps = (window as GoogleMapsWindow).google?.maps;
-        if (maps) resolve(maps);
-        else reject(new Error('Google Maps loaded without its Maps JavaScript library.'));
+        void getMapsApi().then(resolve, reject);
       }, { once: true });
       existingScript.addEventListener('error', () => reject(new Error('Google Maps could not load. Check your API key and website restrictions.')), { once: true });
       return;
@@ -72,9 +80,7 @@ function loadGoogleMaps(): Promise<GoogleMapsApi> {
     script.async = true;
     script.defer = true;
     script.onload = () => {
-      const maps = (window as GoogleMapsWindow).google?.maps;
-      if (maps) resolve(maps);
-      else reject(new Error('Google Maps loaded without its Maps JavaScript library.'));
+      void getMapsApi().then(resolve, reject);
     };
     script.onerror = () => reject(new Error('Google Maps could not load. Check billing, enabled APIs, and website restrictions.'));
     document.head.appendChild(script);
