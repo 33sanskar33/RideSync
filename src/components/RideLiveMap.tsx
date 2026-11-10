@@ -61,7 +61,9 @@ function loadGoogleMaps(): Promise<GoogleMapsApi> {
   }
 
   const existing = (window as GoogleMapsWindow).google?.maps;
-  if (existing) return Promise.resolve(existing);
+  // Even when another part of the app has already loaded the Maps namespace,
+  // resolve the Maps library so its Map constructor is available.
+  if (existing) return getMapsApi();
   if (mapsApiPromise) return mapsApiPromise;
 
   mapsApiPromise = new Promise((resolve, reject) => {
